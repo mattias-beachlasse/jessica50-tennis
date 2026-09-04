@@ -254,6 +254,54 @@ header.top .top-inner{position:relative;z-index:1;padding-top:clamp(56px,11vw,12
 .pod.p1{background:linear-gradient(180deg,var(--accent-soft),var(--surface) 80%)}
 .roundhead h2{font-style:italic}
 .empty h3{font-style:italic}
+
+/* ---------- ceremony ---------- */
+.cer{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:3vh;cursor:pointer;padding:2vh 0;-webkit-tap-highlight-color:transparent;user-select:none}
+.cer-title{display:flex;flex-direction:column;align-items:center;gap:2vh}
+.cer-title .eyebrow{font-size:clamp(11px,1.2vw,16px)}
+.cer-title h1{font-size:clamp(48px,9vw,140px);line-height:.92;font-style:italic;animation:pop .7s cubic-bezier(.2,.8,.2,1) both}
+.cer-hint{color:var(--muted);font-size:clamp(10px,1vw,14px);letter-spacing:.24em;text-transform:uppercase}
+.cer-pod{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1.6vw;width:100%;max-width:1150px;align-items:end}
+.cer-slot{border:1px solid var(--line);background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:3vh 1.2vw 2.6vh;border-radius:var(--radius);min-height:24vh;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:.8vh}
+.cer-slot .place{font-size:clamp(10px,1vw,14px);letter-spacing:.26em;text-transform:uppercase;color:var(--muted);font-weight:500}
+.cer-slot .nm{font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(24px,3.2vw,52px);line-height:1.02;font-weight:500;text-wrap:balance}
+.cer-slot .pts{font-size:clamp(11px,1.1vw,16px);color:var(--muted);letter-spacing:.06em}
+.cer-slot .q{font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(44px,6vw,96px);color:var(--line2);line-height:1}
+.cer-slot.wait{opacity:.55}
+.cer-slot.p1{min-height:36vh;border-color:var(--accent);background:linear-gradient(180deg,var(--accent-soft),color-mix(in srgb,var(--surface) 88%,transparent) 70%)}
+.cer-slot.p1 .place{color:var(--accent)}
+.cer-slot.p1 .nm{font-size:clamp(34px,4.6vw,76px);color:var(--accent);font-style:italic}
+.cer-slot.p3{min-height:20vh}
+.cer-slot.reveal{animation:pop .7s cubic-bezier(.2,.8,.2,1) both}
+@keyframes pop{from{transform:translateY(28px) scale(.94);opacity:0}to{transform:none;opacity:1}}
+.cer-awards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:1.4vw;width:100%;max-width:1250px}
+.cer-aw{background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);padding:2.4vh 1.4vw;text-align:left;border-radius:var(--radius);animation:pop .7s cubic-bezier(.2,.8,.2,1) both;display:flex;flex-direction:column;gap:.6vh}
+.cer-aw .t{font-size:clamp(9.5px,.9vw,13px);letter-spacing:.24em;text-transform:uppercase;color:var(--accent);font-weight:500}
+.cer-aw .w{font-family:"Cormorant Garamond",Georgia,serif;font-size:clamp(22px,2.4vw,38px);line-height:1.05;font-weight:500}
+.cer-aw .y{color:var(--muted);font-size:clamp(12px,1.05vw,16px)}
+#screen .sh .btn.sm{padding:6px 10px}
+
+/* ---------- print sheet ---------- */
+#print{display:none}
+@media print{
+  #app,.toast,.modal-bg{display:none!important}
+  #print{display:block!important;color:#000;background:#fff;font-family:"Jost",system-ui,sans-serif;font-size:11pt}
+  body{background:#fff;color:#000}
+  #print h1{font-family:"Cormorant Garamond",Georgia,serif;font-size:28pt;font-weight:500;font-style:italic;margin:0}
+  #print .psub{font-size:9pt;letter-spacing:.2em;text-transform:uppercase;color:#666;margin:4pt 0 14pt}
+  #print h2{font-family:"Cormorant Garamond",Georgia,serif;font-size:20pt;font-weight:500;margin:14pt 0 6pt;border-bottom:1px solid #000;padding-bottom:3pt;page-break-after:avoid}
+  #print h3{font-size:9pt;letter-spacing:.2em;text-transform:uppercase;font-weight:500;color:#555;margin:10pt 0 3pt;page-break-after:avoid}
+  #print table{width:100%;border-collapse:collapse;page-break-inside:avoid}
+  #print td,#print th{padding:3pt 5pt;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}
+  #print th{font-size:8pt;letter-spacing:.14em;text-transform:uppercase;color:#666;font-weight:500;border-bottom:1px solid #999}
+  #print td.r,#print th.r{text-align:right;white-space:nowrap}
+  #print td.sc{text-align:center;white-space:nowrap;font-weight:600}
+  #print .win{font-weight:600}
+  #print .sit{font-size:9pt;color:#555;margin:3pt 0 0}
+  #print .pclass{page-break-before:always}
+  #print .pclass:first-of-type{page-break-before:auto}
+  #print .fine{font-size:8pt;color:#777;margin-top:12pt}
+}
 </style>
 
 <div id="app"></div>
@@ -440,11 +488,36 @@ const fmt=n=>Number.isInteger(n)?String(n):n.toFixed(1);
 
 /* ---------------- timer ---------------- */
 let audioCtx=null,alarmDone={};
-function beep(){
+/* iOS only lets audio play after a tap: create + resume the context inside the Start tap, and prime it with a silent buffer */
+function unlockAudio(){
   try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
-    [0,.25,.5].forEach(t=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='sine';o.frequency.value=880;g.gain.value=.25;o.connect(g);g.connect(audioCtx.destination);o.start(audioCtx.currentTime+t);o.stop(audioCtx.currentTime+t+.18);});
+    if(audioCtx.state==='suspended')audioCtx.resume();
+    const b=audioCtx.createBuffer(1,1,22050),s=audioCtx.createBufferSource();s.buffer=b;s.connect(audioCtx.destination);s.start(0);
   }catch(e){}
 }
+function beep(){
+  try{unlockAudio();
+    const t0=audioCtx.currentTime+.05;
+    [[0,660],[.22,880],[.44,1100],[1.0,660],[1.22,880],[1.44,1100]].forEach(([t,f])=>{
+      const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type='triangle';o.frequency.value=f;
+      g.gain.setValueAtTime(0,t0+t);g.gain.linearRampToValueAtTime(.6,t0+t+.02);g.gain.exponentialRampToValueAtTime(.001,t0+t+.38);
+      o.connect(g);g.connect(audioCtx.destination);o.start(t0+t);o.stop(t0+t+.4);
+    });
+  }catch(e){}
+  try{if(navigator.vibrate)navigator.vibrate([300,150,300,150,700]);}catch(e){}
+  toast('Time! Finish the point and enter the score');
+}
+/* keep the screen awake while a round is running or the big screen is up */
+let wakeLock=null;
+async function syncWakeLock(){
+  const want=S.ui.view==='screen'||S.ui.view==='ceremony'||S.classes.some(c=>c.rounds.some(r=>r.startedAt&&r.pausedLeft==null&&timerLeft(r)>-900));
+  try{
+    if(want&&!wakeLock&&navigator.wakeLock&&document.visibilityState==='visible'){wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',()=>{wakeLock=null;});}
+    else if(!want&&wakeLock){const w=wakeLock;wakeLock=null;await w.release();}
+  }catch(e){wakeLock=null;}
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')syncWakeLock();});
+setInterval(syncWakeLock,5000);
 function timerLeft(r){
   const total=Number(S.meta.matchMin)*60;
   if(r.pausedLeft!=null)return r.pausedLeft;
@@ -532,7 +605,9 @@ if(window.matchMedia)window.matchMedia('(prefers-color-scheme: dark)').addEventL
 /* ---------------- render ---------------- */
 function render(){
   const app=document.getElementById('app');
+  syncWakeLock();
   if(S.ui.view==='screen'){document.body.classList.add('screen');app.innerHTML=renderScreen();requestAnimationFrame(paintAll);return;}
+  if(S.ui.view==='ceremony'){document.body.classList.add('screen');app.innerHTML=renderCeremony();requestAnimationFrame(paintAll);return;}
   document.body.classList.remove('screen');
   const c=cls();
   const views={players:renderPlayers,rounds:renderRounds,standings:renderStandings};
@@ -643,7 +718,7 @@ function renderStandings(c){
   const open=S.ui.open||null;
   return `<div class="stack">
     <div class="row between"><div><div class="eyebrow">${esc(c.name)} · after ${done} complete round${done===1?'':'s'}</div><h2 style="font-size:30px">Standings</h2></div>
-      <div class="row"><button class="btn sm" data-act="copy">Copy</button><button class="btn sm" data-act="share">Share</button></div></div>
+      <div class="row"><button class="btn sm" data-act="copy">Copy</button><button class="btn sm" data-act="share">Share</button><button class="btn sm" data-act="print">Print</button></div></div>
     ${done?`<div class="podium">${[1,0,2].map(i=>top[i]?`<div class="pod p${i+1}"><div class="place">${['1st','2nd','3rd'][i]}</div><div class="pname">${esc(top[i].name)}</div><div class="pts">${mode==='wins'?top[i].wins+'W':fmt(top[i].total)}</div></div>`:'').join('')}</div>`:''}
     <div class="card tablewrap"><table class="stand"><thead><tr><th>#</th><th>Player</th><th>P</th><th>W</th>${mode==='wins'?'':'<th>For</th>'}<th>+/-</th><th>${mode==='wins'?'Wins':S.settings.rankBy==='avg'?'Avg':'Total'}</th></tr></thead><tbody>
     ${rows.map(r=>{const mv=prevRank[r.id]?prevRank[r.id]-r.rank:0;return `<tr class="${r.rank===1&&done?'top1':''} ${r.active?'':'off'}" data-act="open" data-id="${r.id}" style="cursor:pointer">
@@ -693,7 +768,63 @@ function renderScreen(){
     <div class="sh"><div><h1>${esc(S.meta.name)}</h1><div class="sub">${esc(S.meta.sub)}</div></div><div class="sclock"><div class="clock" data-clock>${nowStr()}</div><div>${timers}</div></div></div>
     <div class="body">${body||'<div class="empty"><h3>Add players to begin</h3></div>'}</div>
     <div class="sfoot"><span>${sitting||'Everyone is on court'}</span><span>${next}</span></div>
-    <div class="exit row"><button class="btn sm" data-act="fullscreen">Fullscreen</button><button class="btn sm" data-act="view" data-v="rounds">Exit</button></div>
+    <div class="exit row">${classes.some(c=>c.rounds.some(roundComplete))?`<button class="btn sm" data-act="ceremony" style="color:var(--accent);border-color:var(--accent)">Ceremony</button>`:''}<button class="btn sm" data-act="fullscreen">Fullscreen</button><button class="btn sm" data-act="view" data-v="rounds">Exit</button></div>
+  </div>`;
+}
+
+/* ---------------- ceremony ---------------- */
+function awards(c){
+  const rows=standings(c);const rank={};rows.forEach(r=>rank[r.id]=r.rank);
+  const mode=S.settings.scoring;const out=[];
+  const done=[];c.rounds.forEach(r=>r.matches.forEach(m=>{if(isDone(m))done.push({r,m,s:scoreOf(m)});}));
+  if(!done.length)return out;
+  const names=ids=>ids.map(id=>pname(c,id)).join(' & ');
+  const plural=(n,w)=>n+' '+(n===1?w:w==='match'?'matches':w+'s');
+  if(mode!=='wins'){
+    const wd=done.map(d=>({...d,diff:Math.abs(d.s.sa-d.s.sb),tot:d.s.sa+d.s.sb}));
+    const tight=wd.filter(d=>d.diff>0).sort((a,b)=>a.diff-b.diff||b.tot-a.tot)[0];
+    if(tight)out.push({t:'Nail-biter of the day',who:`${names(tight.m.a)} vs ${names(tight.m.b)}`,why:`${fmt(tight.s.sa)}–${fmt(tight.s.sb)} in round ${tight.r.n}`});
+    const big=wd.slice().sort((a,b)=>b.diff-a.diff||b.tot-a.tot)[0];
+    if(big&&big.diff>0&&big!==tight)out.push({t:'The steamroller',who:names(big.s.winner==='a'?big.m.a:big.m.b),why:`${fmt(Math.max(big.s.sa,big.s.sb))}–${fmt(Math.min(big.s.sa,big.s.sb))} in round ${big.r.n}`});
+  }
+  const unb=rows.filter(r=>r.played>=2&&r.losses===0);
+  if(unb.length&&unb.length<=2)out.push({t:'Unbeaten',who:unb.map(x=>x.name).join(' & '),why:'not a single loss all day'});
+  const iron=rows.slice().sort((a,b)=>b.played-a.played||a.byes-b.byes||a.rank-b.rank)[0];
+  if(iron&&iron.played>=2&&rows.some(r=>r.played<iron.played))out.push({t:'Iron legs',who:iron.name,why:`${plural(iron.played,'match')}, ${iron.byes?plural(iron.byes,'rest'):'never sat down'}`});
+  const ps={};c.rounds.forEach(r=>r.matches.forEach(m=>{if(!isDone(m))return;[m.a,m.b].forEach(t=>{if(t.length<2)return;(ps[t[0]]=ps[t[0]]||[]).push(rank[t[1]]);(ps[t[1]]=ps[t[1]]||[]).push(rank[t[0]]);});}));
+  const lucky=Object.entries(ps).map(([id,rs])=>({id,avg:rs.reduce((a,b)=>a+b,0)/rs.length,n:rs.length})).filter(x=>x.n>=2&&rank[x.id]).sort((a,b)=>a.avg-b.avg)[0];
+  if(lucky)out.push({t:'Drew the good partners',who:pname(c,lucky.id),why:`average partner finished in place ${lucky.avg.toFixed(1)}`});
+  const half=Math.floor(c.rounds.length/2);
+  if(half>=1&&c.rounds.length>=3){const mid={};standings(c,half).forEach(r=>mid[r.id]=r.rank);const climb=rows.map(r=>({r,up:(mid[r.id]||r.rank)-r.rank})).sort((a,b)=>b.up-a.up)[0];if(climb&&climb.up>=2)out.push({t:'Late charge',who:climb.r.name,why:`climbed ${plural(climb.up,'place')} after the break`});}
+  return out.slice(0,5);
+}
+function renderCeremony(){
+  const cands=S.classes.filter(c=>c.rounds.some(roundComplete));
+  const st=S.ui.cer||{};
+  const c=cands.find(x=>x.id===st.cls)||cands[0];
+  if(!c)return renderScreen();
+  const step=Math.max(0,Math.min(4,st.step||0));
+  const rows=standings(c).filter(r=>r.played>0);
+  const mode=S.settings.scoring;
+  const val=r=>mode==='wins'?r.wins+(r.wins===1?' win':' wins'):S.settings.rankBy==='avg'?r.avg.toFixed(1)+' avg':fmt(r.total)+' pts';
+  const top=[rows[0],rows[1],rows[2]];
+  let inner='';
+  if(step===0){
+    inner=`<div class="cer-title"><div class="eyebrow">The results</div><h1>${esc(c.name)}</h1><div class="cer-hint">Tap to reveal · ${c.rounds.filter(roundComplete).length} rounds played</div></div>`;
+  }else if(step<=3){
+    const slot=(i,cls)=>{const r=top[i];const shown=step>=3-i;
+      return `<div class="cer-slot p${i+1} ${shown?'reveal':'wait'}"><div class="place">${['1st','2nd','3rd'][i]}</div>${shown&&r?`<div class="nm">${esc(r.name)}</div><div class="pts">${val(r)} · ${r.wins} w</div>`:`<div class="q">?</div>`}</div>`;};
+    inner=`<div class="cer-pod">${slot(1)}${slot(0)}${slot(2)}</div><div class="cer-hint">${step<3?'Tap for the next place':'Tap for the awards'}</div>`;
+  }else{
+    const aw=awards(c);
+    inner=`<div class="cer-title" style="gap:1vh"><div class="eyebrow">Honours · ${esc(c.name)}</div><h2 class="serif" style="font-size:clamp(28px,4vw,56px)">Champion · ${esc(top[0]?top[0].name:'')}</h2></div>
+      <div class="cer-awards">${aw.map((a,i)=>`<div class="cer-aw" style="animation-delay:${i*.25}s"><div class="t">${esc(a.t)}</div><div class="w">${esc(a.who)}</div><div class="y">${esc(a.why)}</div></div>`).join('')||'<div class="muted">Play a few more matches for awards</div>'}</div>
+      <div class="cer-hint">${cands.length>1?'Switch class above, or exit':'Tap exit when the applause dies down'}</div>`;
+  }
+  return `<div id="screen"><canvas class="land" aria-hidden="true"></canvas>
+    <div class="sh"><div><h1>${esc(S.meta.name)}</h1><div class="sub">${esc(S.meta.sub)}</div></div><div class="row" style="gap:6px">${cands.length>1?cands.map(k=>`<button class="btn sm ${k.id===c.id?'primary':''}" data-act="cercls" data-id="${k.id}">${esc(k.name)}</button>`).join(''):''}</div></div>
+    <div class="cer" data-act="cernext">${inner}</div>
+    <div class="exit row"><button class="btn sm" data-act="cerback" ${step===0?'disabled':''}>Back</button><button class="btn sm" data-act="fullscreen">Fullscreen</button><button class="btn sm" data-act="view" data-v="screen">Exit</button></div>
   </div>`;
 }
 
@@ -712,6 +843,7 @@ function openSettings(){
     <div><div class="eyebrow" style="margin-bottom:6px">Draw</div>${radio('drawMode',s.drawMode,[['americano','Americano · random','New partners every round, never the same partner twice when avoidable.'],['mexicano','Mexicano · by standings','1st & 4th vs 2nd & 3rd, then the next four. Tighter matches late in the day.']])}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Appearance</div><select class="input" name="theme"><option value="">Follow device</option><option value="dark" ${localStorage.getItem('courtside.theme')==='dark'?'selected':''}>Dark (courtside)</option><option value="light" ${localStorage.getItem('courtside.theme')==='light'?'selected':''}>Light (limestone)</option></select></div>
     <div class="hr"></div>
+    <div class="row"><button class="btn sm" data-act2="print">Print / PDF day sheet</button><button class="btn sm" data-act2="chime">Test the chime</button></div>
     <div class="row"><button class="btn sm" data-act2="backup">Copy backup</button><button class="btn sm" data-act2="restore">Restore from clipboard</button><button class="btn sm danger" data-act2="reset">Start over</button></div>
     <div class="row" style="margin-top:6px"><button class="btn grow" data-close>Cancel</button><button class="btn grow primary" data-ok>Save</button></div>
   </div>`,(bg,close)=>{
@@ -725,6 +857,8 @@ function openSettings(){
       const th=g('theme');try{if(th)localStorage.setItem('courtside.theme',th);else localStorage.removeItem('courtside.theme');}catch(e){}applyTheme();
       close();save();render();toast('Saved');
     });
+    bg.querySelector('[data-act2="print"]').addEventListener('click',()=>{close();printSheet();});
+    bg.querySelector('[data-act2="chime"]').addEventListener('click',()=>{beep();});
     bg.querySelector('[data-act2="backup"]').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(S));toast('Backup copied. Paste it somewhere safe.');}catch(e){toast('Clipboard blocked. Use a desktop browser.');}});
     bg.querySelector('[data-act2="restore"]').addEventListener('click',async()=>{try{const t=await navigator.clipboard.readText();const s=JSON.parse(t);if(!s.classes)throw 0;snapshot();S=s;save();close();render();toast('Restored');}catch(e){toast('Clipboard has no valid backup');}});
     bg.querySelector('[data-act2="reset"]').addEventListener('click',()=>{close();confirmBox('Start over?','Deletes every player, round and result on this device.','Delete everything',()=>{snapshot();S=freshState();save();render();toast('Fresh start');},true);});
@@ -757,7 +891,7 @@ document.addEventListener('click',e=>{
     case 'reshuffle':{const r=c.rounds[c.rounds.length-1];if(r.matches.some(m=>m.sa!=null||m.sb!=null||m.winner)){toast('Clear the results first');return;}snapshot();drawRound(c,true);save();render();toast('Shuffled');break;}
     case 'delround':confirmBox('Delete round '+c.rounds[c.rounds.length-1].n+'?','Its results are lost.','Delete',()=>{snapshot();c.rounds.pop();S.ui.round[c.id]=c.rounds.length-1;save();render();},true);break;
     case 'round':S.ui.round[c.id]=+el.dataset.i;save();render();break;
-    case 'tstart':{const r=c.rounds[roundIdx()];snapshot();if(r.pausedLeft!=null){r.startedAt=Date.now()-(Number(S.meta.matchMin)*60-r.pausedLeft)*1000;r.pausedLeft=null;}else{r.startedAt=Date.now();r.pausedLeft=null;}delete alarmDone[c.id+':'+r.n];save();render();try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();}catch(e){}break;}
+    case 'tstart':{const r=c.rounds[roundIdx()];snapshot();if(r.pausedLeft!=null){r.startedAt=Date.now()-(Number(S.meta.matchMin)*60-r.pausedLeft)*1000;r.pausedLeft=null;}else{r.startedAt=Date.now();r.pausedLeft=null;}delete alarmDone[c.id+':'+r.n];unlockAudio();save();render();break;}
     case 'tpause':{const r=c.rounds[roundIdx()];r.pausedLeft=timerLeft(r);save();render();break;}
     case 'treset':{const r=c.rounds[roundIdx()];r.startedAt=null;r.pausedLeft=null;delete alarmDone[c.id+':'+r.n];save();render();break;}
     case 'win':{const {m}=findMatch(el.dataset.m);snapshot();m.winner=m.winner===el.dataset.side?null:el.dataset.side;save();render();break;}
@@ -777,6 +911,11 @@ document.addEventListener('click',e=>{
     case 'copy':{navigator.clipboard.writeText(standingsText(c)).then(()=>toast('Standings copied')).catch(()=>toast('Clipboard blocked'));break;}
     case 'share':{const t=standingsText(c);if(navigator.share)navigator.share({title:S.meta.name,text:t}).catch(()=>{});else navigator.clipboard.writeText(t).then(()=>toast('Copied (no share sheet here)')).catch(()=>toast('Clipboard blocked'));break;}
     case 'fullscreen':{const d=document.documentElement;if(document.fullscreenElement)document.exitFullscreen();else if(d.requestFullscreen)d.requestFullscreen().catch(()=>toast('Fullscreen blocked here, use the browser menu'));else toast('Use the browser menu for fullscreen');break;}
+    case 'ceremony':{const cands=S.classes.filter(x=>x.rounds.some(roundComplete));if(!cands.length){toast('Finish a round first');return;}S.ui.cer={cls:cands[0].id,step:0};S.ui.view='ceremony';save();render();break;}
+    case 'cernext':{const st=S.ui.cer||(S.ui.cer={step:0});if(st.step<4){st.step=(st.step||0)+1;save();render();}break;}
+    case 'cerback':{const st=S.ui.cer||(S.ui.cer={step:0});if(st.step>0){st.step--;save();render();}break;}
+    case 'cercls':{S.ui.cer={cls:el.dataset.id,step:0};save();render();break;}
+    case 'print':printSheet();break;
   }
 });
 document.addEventListener('change',e=>{
@@ -790,8 +929,32 @@ document.addEventListener('change',e=>{
       if(v!=null&&other&&other.value==='')other.focus();else render();break;}
   }
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&S.ui.view==='screen'){S.ui.view='rounds';save();render();}});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&(S.ui.view==='screen'||S.ui.view==='ceremony')){S.ui.view='rounds';save();render();}
+  if(S.ui.view==='ceremony'&&(e.key===' '||e.key==='ArrowRight'||e.key==='Enter')){e.preventDefault();document.querySelector('[data-act="cernext"]').click();}
+  if(S.ui.view==='ceremony'&&e.key==='ArrowLeft'){document.querySelector('[data-act="cerback"]').click();}
+});
 window.addEventListener('storage',e=>{if(e.key===KEY){S=load();render();}});
+
+/* ---------------- print sheet ---------------- */
+function printSheet(){
+  const mode=S.settings.scoring;
+  let el=document.getElementById('print');if(!el){el=document.createElement('div');el.id='print';document.body.appendChild(el);}
+  const classes=S.classes.filter(c=>c.rounds.length);
+  if(!classes.length){toast('Nothing to print yet');return;}
+  const val=r=>mode==='wins'?r.wins:S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total);
+  el.innerHTML=`<h1>${esc(S.meta.name)}</h1><div class="psub">${esc(S.meta.sub)}</div>`+classes.map(c=>{
+    const rows=standings(c);const done=c.rounds.filter(roundComplete).length;
+    return `<section class="pclass"><h2>${esc(c.name)} · final standings</h2>
+      <table><thead><tr><th class="r">#</th><th>Player</th><th class="r">Played</th><th class="r">Won</th>${mode==='wins'?'':'<th class="r">For</th><th class="r">+/-</th>'}<th class="r">${mode==='wins'?'Wins':S.settings.rankBy==='avg'?'Average':'Total'}</th></tr></thead><tbody>
+      ${rows.map(r=>`<tr><td class="r">${r.rank}</td><td>${esc(r.name)}${r.active?'':' (out)'}</td><td class="r">${r.played}</td><td class="r">${r.wins}</td>${mode==='wins'?'':`<td class="r">${fmt(r.pf)}${r.bonus?' +'+fmt(r.bonus):''}</td><td class="r">${r.diff>0?'+':''}${fmt(r.diff)}</td>`}<td class="r"><b>${val(r)}</b></td></tr>`).join('')}
+      </tbody></table>
+      <div class="fine">${done} of ${c.rounds.length} rounds complete · ranked by ${mode==='wins'?'wins, then point difference':S.settings.rankBy==='avg'?'average per match':'total, then wins, then difference'}${S.settings.byeComp==='average'?' · sit-outs receive the round average':''}</div>
+      ${c.rounds.map(r=>`<h3>Round ${r.n} · ${esc(r.time)}</h3><table><tbody>${r.matches.map(m=>{const d=isDone(m);const s=d?scoreOf(m):null;const w=s?s.winner:null;
+        return `<tr><td style="width:14%;color:#666">${esc(m.court)}</td><td class="${w==='a'?'win':''}" style="width:36%">${m.a.map(id=>esc(pname(c,id))).join(' & ')}</td><td class="sc" style="width:14%">${d?(mode==='wins'?(w==='a'?'W – L':w==='b'?'L – W':'D – D'):`${fmt(Number(m.sa))} – ${fmt(Number(m.sb))}`):'–'}</td><td class="${w==='b'?'win':''}" style="width:36%">${m.b.map(id=>esc(pname(c,id))).join(' & ')}</td></tr>`}).join('')}</tbody></table>${r.byes.length?`<div class="sit">Sitting out: ${r.byes.map(id=>esc(pname(c,id))).join(', ')}</div>`:''}`).join('')}
+    </section>`;}).join('')+`<div class="fine">Printed ${new Date().toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short'})}</div>`;
+  setTimeout(()=>{try{window.print();}catch(e){toast('Use the browser share/print menu');}},150);
+}
 
 function standingsText(c){
   const rows=standings(c);const mode=S.settings.scoring;
