@@ -252,14 +252,14 @@ header.top .top-inner{position:relative;z-index:1;padding-top:clamp(56px,11vw,12
 .sfoot{background:color-mix(in srgb,var(--surface) 86%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:var(--radius);padding:1vh 1.2vw}
 .scls .ct{background:transparent}
 /* phones (guest view): let the page scroll instead of squeezing tables into the viewport */
-@media (max-width:899px){#screen{position:static;min-height:100vh;height:auto;overflow:visible}#screen canvas.land{position:fixed}#screen .body{overflow:visible;min-height:auto}.scls,.stab{min-height:auto;overflow:visible}.stab.two{grid-template-columns:1fr}body.screen{overflow:auto}#screen .exit{position:sticky;top:6px;justify-content:flex-end;opacity:1}}
+@media (max-width:899px){.stab td.s{font-size:12px}.sfoot{flex-direction:column;align-items:flex-start;gap:6px;font-size:13px}#screen{position:static;min-height:100vh;height:auto;overflow:visible}#screen canvas.land{position:fixed}#screen .body{overflow:visible;min-height:auto}.scls,.stab{min-height:auto;overflow:visible}.stab.two{grid-template-columns:1fr}body.screen{overflow:auto}#screen .exit{position:sticky;top:6px;justify-content:flex-end;opacity:1}}
 .pod.p1{background:linear-gradient(180deg,var(--accent-soft),var(--surface) 80%)}
 .roundhead h2{font-style:italic}
 .empty h3{font-style:italic}
 .syncdot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--line2);margin-right:4px;vertical-align:middle}
-.syncdot.ok{background:var(--live)}.syncdot.err{background:var(--danger)}.syncdot.off{background:var(--line2)}
+.syncdot.ok{background:var(--live)}.syncdot.err{background:var(--danger)}.syncdot.off{background:var(--line2)}.syncdot.pending{background:var(--accent);animation:blink 1s steps(2) infinite}
 .robanner{display:flex;flex-direction:column;gap:4px;border-color:var(--accent);margin-bottom:16px}
-main.ro [data-act]:not([data-act="round"]):not([data-act="open"]):not([data-act="view"]):not([data-act="copy"]):not([data-act="share"]):not([data-act="print"]):not([data-act="settings"]):not([data-act="takeback"]):not([data-act="dropmine"]),main.ro input,main.ro textarea{pointer-events:none;opacity:.55}
+main.ro [data-act]:not([data-act="round"]):not([data-act="open"]):not([data-act="view"]):not([data-act="copy"]):not([data-act="share"]):not([data-act="print"]):not([data-act="settings"]):not([data-act="takeback"]):not([data-act="dropmine"]),main.ro input,main.ro textarea{pointer-events:none;opacity:.35;filter:grayscale(1)}
 
 /* ---------- ceremony ---------- */
 .cer{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:3vh;cursor:pointer;padding:2vh 0;-webkit-tap-highlight-color:transparent;user-select:none}
@@ -367,7 +367,7 @@ function ownsClass(c){return !c.owner||c.owner===DEVICE;}
 /* who yields when two devices both think they own a class: the later claim wins; identical timestamps break on device id so both sides agree */
 function theyWin(c,remote){const ru=remote.updatedAt||0,mc=c.claimedAt||0;if(ru>mc)return true;if(ru<mc)return false;return String(remote.owner)<DEVICE;}
 function isRemote(c){return !!c.owner&&c.owner!==DEVICE;}
-function claim(c){if(isRemote(c))return false;if(c.owner!==DEVICE){c.owner=DEVICE;c.claimedAt=Date.now();}c.ownerLabel=S.sync&&S.sync.label||'';c.updatedAt=Date.now();SYNC.dirty.add(c.id);return true;}
+function claim(c){if(isRemote(c))return false;if(c.owner!==DEVICE){c.owner=DEVICE;c.claimedAt=Date.now();}c.ownerLabel=S.sync&&S.sync.label||'';c.updatedAt=Date.now();if(!SYNC.dirty.size)SYNC.dirtySince=Date.now();SYNC.dirty.add(c.id);return true;}
 function persist(){try{localStorage.setItem(GUEST?KEY+'.guest':KEY,JSON.stringify(S))}catch(e){}}
 function schedulePush(){if(GUEST||!syncOn())return;clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(pushNow,700);}
 function classBody(c){return {id:c.id,name:c.name,courts:c.courts,players:c.players,rounds:c.rounds,owner:c.owner,ownerLabel:c.ownerLabel||'',claimedAt:c.claimedAt||0,updatedAt:c.updatedAt||Date.now()};}
@@ -376,10 +376,13 @@ function classBody(c){return {id:c.id,name:c.name,courts:c.courts,players:c.play
 function stashConflict(local,remote){
   S.conflicts=S.conflicts||{};
   if(local.owner!==DEVICE)return; // already handed over (pull and push can race on reconnect); keep the first stash
-  if(!S.conflicts[local.id])S.conflicts[local.id]={at:Date.now(),theirs:remote.ownerLabel||'the other iPad',mine:JSON.parse(JSON.stringify({name:local.name,courts:local.courts,players:local.players,rounds:local.rounds}))};
+  // keep my copy aside only if it actually differs from theirs (an edit of mine that their later PUT overwrote, or something unpublished); identical content → plain handover
+  const sig=x=>JSON.stringify({p:x.players,c:x.courts,r:x.rounds});
+  const unpublished=SYNC.dirty.has(local.id)||sig(local)!==sig(remote);
+  if(unpublished&&!S.conflicts[local.id])S.conflicts[local.id]={at:Date.now(),theirs:remote.ownerLabel||'the other iPad',mine:JSON.parse(JSON.stringify({name:local.name,courts:local.courts,players:local.players,rounds:local.rounds}))};
   Object.assign(local,{name:remote.name,courts:remote.courts,players:remote.players,rounds:remote.rounds,owner:remote.owner,ownerLabel:remote.ownerLabel||'',claimedAt:remote.claimedAt||0,updatedAt:remote.updatedAt});
   SYNC.dirty.delete(local.id);persist();
-  toast(local.name+': '+(remote.ownerLabel||'the other iPad')+' took over. Your unpublished changes are kept, see the banner.');
+  toast(unpublished?local.name+': '+(remote.ownerLabel||'the other iPad')+' took over. Your unpublished changes are kept, see the banner.':(remote.ownerLabel||'The other iPad')+' now runs '+local.name+'.');
   try{if(navigator.vibrate)navigator.vibrate([200,100,200]);}catch(e){}
 }
 async function pushNow(){
@@ -460,7 +463,8 @@ async function pullNow(){
   finally{SYNC.pulling=false;}
   paintSyncDot();
 }
-function paintSyncDot(){document.querySelectorAll('[data-syncdot]').forEach(el=>{const on=syncOn();const st=!on?'off':SYNC.status==='ok'&&!SYNC.pushErr?'ok':SYNC.status==='off'?'off':'err';el.className='syncdot '+st;el.title=!on?'Sync off':st==='ok'?'Synced '+new Date(SYNC.last).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):SYNC.status==='off'?'Connecting…':'Sync problem: '+(SYNC.lastErr||'')+' (working locally, retrying)';});}
+function paintSyncDot(){document.querySelectorAll('[data-syncdot]').forEach(el=>{const on=syncOn();const unpub=!GUEST&&(SYNC.dirty.size||SYNC.settingsDirty)&&Date.now()-(SYNC.dirtySince||0)>3000;const st=!on?'off':SYNC.status==='off'?'off':(SYNC.pushErr||(SYNC.status==='err'))?'err':unpub?'pending':'ok';el.className='syncdot '+st;el.title=!on?'Sync off':st==='ok'?'Synced '+new Date(SYNC.last).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):st==='pending'?'Changes not yet published, still trying':SYNC.status==='off'?'Connecting…':'Sync problem: '+(SYNC.lastErr||'')+' (working locally, retrying)';});}
+setInterval(paintSyncDot,1000);
 function startSync(){
   clearInterval(SYNC.pullT);SYNC.pullT=setInterval(pullNow,GUEST?3000:4000);
   if(!GUEST){S.classes.forEach(c=>{if(c.owner===DEVICE)SYNC.dirty.add(c.id)});pushNow();}
@@ -627,6 +631,9 @@ function standings(c,uptoRound){
   return rows;
 }
 const fmt=n=>Number.isInteger(n)?String(n):n.toFixed(1);
+function rankNote(){const m=S.settings.scoring,avg=S.settings.byeComp==='average',byAvg=S.settings.rankBy==='avg';
+  if(m==='wins')return 'Ranked by wins'+(avg?' (a sit-out counts as half a win)':'')+(byAvg?', averaged per match played':'')+', then point difference';
+  return 'Ranked by '+(byAvg?'average per match':'total'+(m==='both'?' (score + win bonus)':''))+', then wins, then difference'+(avg?' · sit-outs receive the round average':'');}
 
 /* ---------------- timer ---------------- */
 let audioCtx=null,alarmDone={};
@@ -868,7 +875,7 @@ function renderStandings(c){
       <td class="r">${r.rank}<span class="mv ${mv>0?'up':mv<0?'dn':''}">${mv>0?'▲':mv<0?'▼':''}</span></td><td class="n">${esc(r.name)}${r.active?'':' <span class="muted" style="font-size:12px">(out)</span>'}</td><td>${r.played}</td><td>${r.wins}${r.draws?`<span class="muted">+${r.draws}d</span>`:''}</td>${mode==='wins'?'':`<td>${fmt(r.pf)}${r.bonus?`<span class="muted" title="bye compensation">+${fmt(r.bonus)}</span>`:''}</td>`}<td>${r.diff>0?'+':''}${fmt(r.diff)}</td><td class="tot">${S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total)}</td></tr>
       ${open===r.id?`<tr class="expand"><td colspan="7">${renderHistory(c,r.id)}</td></tr>`:''}`}).join('')}
     </tbody></table></div>
-    <div class="muted" style="font-size:12px;text-align:center">Ranked by ${mode==='wins'?'wins (sit-outs get half a win), then difference':S.settings.rankBy==='avg'?'average per match':'total'+(mode==='both'?' (score + win bonus)':'')+', then wins, then difference'}${S.settings.byeComp==='average'?' · sit-outs receive the round average':''}. Tap a player for their day.</div>
+    <div class="muted" style="font-size:12px;text-align:center">${rankNote()}. Tap a player for their day.</div>
   </div>`;
 }
 function renderHistory(c,id){
@@ -1022,7 +1029,12 @@ function openSettings(){
     bg.querySelector('[data-act2="guestshare"]').addEventListener('click',()=>{const u=guestUrl();if(navigator.share)navigator.share({title:S.meta.name+' · live',url:u}).catch(()=>{});else navigator.clipboard.writeText(u).then(()=>toast('Guest link copied')).catch(()=>toast(u));});
     bg.querySelector('[data-act2="guestcopy"]').addEventListener('click',()=>{navigator.clipboard.writeText(guestUrl()).then(()=>toast('Guest link copied')).catch(()=>toast(guestUrl()));});
     bg.querySelector('[data-act2="guestopen"]').addEventListener('click',()=>{window.open(guestUrl(),'_blank');});
-    bg.querySelectorAll('[data-act2="takeover"]').forEach(b=>b.addEventListener('click',()=>{const k=S.classes.find(x=>x.id===b.dataset.id);close();confirmBox('Take over '+k.name+'?','This iPad becomes the one that runs '+k.name+'. Only do this if the other iPad is gone; if both keep editing, the last one to save wins.','Take over',()=>{snapshot();k.owner=DEVICE;k.ownerLabel=S.sync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();if(S.conflicts)delete S.conflicts[k.id];SYNC.dirty.add(k.id);save();pushNow();render();toast(k.name+' now runs on this iPad');},true);}));
+    bg.querySelectorAll('[data-act2="takeover"]').forEach(b=>b.addEventListener('click',async()=>{const k=S.classes.find(x=>x.id===b.dataset.id);close();
+      // fetch the cloud copy first: this device may have missed the owner's last pushes (backgrounded tab, wifi). Never publish a stale copy over fresher scores.
+      let remote=null,fetched=false;try{const g=await fetchT(syncUrl('classes/'+encodeURIComponent(k.id)),{cache:'no-store'},8000);if(g.ok){const j=await g.json();if(j&&j.id){remote=normalizeClass(j);fetched=true;}}}catch(e){}
+      if(remote&&(remote.updatedAt||0)>(k.updatedAt||0)){Object.assign(k,{name:remote.name,courts:remote.courts,players:remote.players,rounds:remote.rounds,updatedAt:remote.updatedAt});persist();}
+      const last=(remote||k).updatedAt?new Date((remote||k).updatedAt).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'unknown';
+      confirmBox('Take over '+k.name+'?',(fetched?'Latest published update from '+(k.ownerLabel||'the other iPad')+': '+last+'. ':'Could not reach the cloud just now, taking over from the copy on this iPad (last update '+last+'). ')+'This iPad then runs '+k.name+'. If the other iPad has unpublished changes it keeps them aside and can take back; the later take-over wins.','Take over',()=>{snapshot();k.owner=DEVICE;k.ownerLabel=S.sync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();if(S.conflicts)delete S.conflicts[k.id];if(!SYNC.dirty.size)SYNC.dirtySince=Date.now();SYNC.dirty.add(k.id);save();pushNow();render();toast(k.name+' now runs on this iPad');},true);}));
     bg.querySelector('[data-act2="print"]').addEventListener('click',()=>{close();printSheet();});
     bg.querySelector('[data-act2="chime"]').addEventListener('click',()=>{beep();});
     bg.querySelector('[data-act2="backup"]').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(S));toast('Backup copied. Paste it somewhere safe.');}catch(e){toast('Clipboard blocked. Use a desktop browser.');}});
@@ -1127,7 +1139,7 @@ function printSheet(){
       <table><thead><tr><th class="r">#</th><th>Player</th><th class="r">Played</th><th class="r">Won</th>${mode==='wins'?'':'<th class="r">For</th><th class="r">+/-</th>'}<th class="r">${mode==='wins'?'Wins':S.settings.rankBy==='avg'?'Average':'Total'}</th></tr></thead><tbody>
       ${rows.map(r=>`<tr><td class="r">${r.rank}</td><td>${esc(r.name)}${r.active?'':' (out)'}</td><td class="r">${r.played}</td><td class="r">${r.wins}</td>${mode==='wins'?'':`<td class="r">${fmt(r.pf)}${r.bonus?' +'+fmt(r.bonus):''}</td><td class="r">${r.diff>0?'+':''}${fmt(r.diff)}</td>`}<td class="r"><b>${val(r)}</b></td></tr>`).join('')}
       </tbody></table>
-      <div class="fine">${done} of ${c.rounds.length} rounds complete · ranked by ${mode==='wins'?'wins, then point difference':S.settings.rankBy==='avg'?'average per match':'total, then wins, then difference'}${S.settings.byeComp==='average'?' · sit-outs receive the round average':''}</div>
+      <div class="fine">${done} of ${c.rounds.length} rounds complete · ${rankNote()}</div>
       ${c.rounds.map(r=>`<h3>Round ${r.n} · ${esc(r.time)}</h3><table><tbody>${r.matches.map(m=>{const d=isDone(m);const s=d?scoreOf(m):null;const w=s?s.winner:null;
         return `<tr><td style="width:14%;color:#666">${esc(m.court)}</td><td class="${w==='a'?'win':''}" style="width:36%">${m.a.map(id=>esc(pname(c,id))).join(' & ')}</td><td class="sc" style="width:14%">${d?(mode==='wins'?(w==='a'?'W – L':w==='b'?'L – W':'D – D'):`${fmt(Number(m.sa))} – ${fmt(Number(m.sb))}`):'–'}</td><td class="${w==='b'?'win':''}" style="width:36%">${m.b.map(id=>esc(pname(c,id))).join(' & ')}</td></tr>`}).join('')}</tbody></table>${r.byes.length?`<div class="sit">Sitting out: ${r.byes.map(id=>esc(pname(c,id))).join(', ')}</div>`:''}`).join('')}
     </section>`;}).join('')+`<div class="fine">Printed ${new Date().toLocaleString('en-GB',{dateStyle:'long',timeStyle:'short'})}</div>`;
