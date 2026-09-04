@@ -348,8 +348,9 @@ const GUEST=URLP.has('live');
 const DEVICE=(()=>{try{let d=localStorage.getItem('courtside.device');if(!d){d=uid()+uid();localStorage.setItem('courtside.device',d);}return d;}catch(e){return 'anon'+uid();}})();
 let S=load();
 let history=[];
-function load(){let st=null;try{const r=localStorage.getItem(GUEST?KEY+'.guest':KEY);if(r){const s=JSON.parse(r);if(s&&s.classes)st=s;}}catch(e){}st=st||freshState();st.sync=st.sync||{code:'jessica50',on:true,label:''};if(URLP.get('event'))st.sync.code=URLP.get('event');return st;}
-function save(){try{localStorage.setItem(GUEST?KEY+'.guest':KEY,JSON.stringify(S))}catch(e){}schedulePush();}
+function skey(){return GUEST?KEY+'.guest.'+((URLP.get('event')||'jessica50').toLowerCase().replace(/[^a-z0-9-]/g,'')):KEY;}
+function load(){let st=null;try{const r=localStorage.getItem(skey());if(r){const s=JSON.parse(r);if(s&&s.classes)st=s;}}catch(e){}st=st||freshState();st.sync=st.sync||{code:'jessica50',on:true,label:''};if(URLP.get('event'))st.sync.code=URLP.get('event');return st;}
+function save(){try{localStorage.setItem(skey(),JSON.stringify(S))}catch(e){}schedulePush();}
 
 /* ---------------- sync (Firebase Realtime Database, REST, no SDK) ----------------
    Local-first: this device is always the source of truth for the classes it owns. Ownership is claimed by the first
@@ -357,7 +358,7 @@ function save(){try{localStorage.setItem(GUEST?KEY+'.guest':KEY,JSON.stringify(S
    and can "take over" if the owning iPad dies. Guests open ?live for a read-only big screen. Everything keeps working
    with no network; sync simply resumes when it returns. */
 const DB='https://jessica50-tennis-default-rtdb.europe-west1.firebasedatabase.app';
-const SYNC={status:'off',last:0,lastErr:null,pushT:null,pushing:false,pending:false,pulling:false,pullT:null,dirty:new Set(),settingsDirty:false,lastPushAt:0,pushErr:false};
+const SYNC={status:'off',last:0,lastErr:null,pushT:null,pushing:false,pending:false,pulling:false,pullT:null,dirty:new Set(),settingsDirty:false,lastPushAt:0,pushErr:false,etags:{}};
 function syncOn(){return GUEST||!(S.sync&&S.sync.on===false);}
 function syncCode(){return (S.sync&&S.sync.code||'jessica50').trim().toLowerCase().replace(/[^a-z0-9-]/g,'');}
 function syncUrl(path){return `${DB}/events/${encodeURIComponent(syncCode())}${path?'/'+path:''}.json`;}
@@ -365,10 +366,11 @@ function syncUrl(path){return `${DB}/events/${encodeURIComponent(syncCode())}${p
 function fetchT(url,opts,ms){const ac=new AbortController();const t=setTimeout(()=>ac.abort(),ms||8000);return fetch(url,{...(opts||{}),signal:ac.signal}).finally(()=>clearTimeout(t));}
 function ownsClass(c){return !c.owner||c.owner===DEVICE;}
 /* who yields when two devices both think they own a class: the later claim wins; identical timestamps break on device id so both sides agree */
-function theyWin(c,remote){const ru=remote.updatedAt||0,mc=c.claimedAt||0;if(ru>mc)return true;if(ru<mc)return false;return String(remote.owner)<DEVICE;}
+/* who yields when two devices both think they own a class: the LATER CLAIM wins, compared claim-to-claim so both sides reach the same answer; identical timestamps break on device id */
+function theyWin(c,remote){const rc=remote.claimedAt||0,mc=c.claimedAt||0;if(rc>mc)return true;if(rc<mc)return false;return String(remote.owner)<DEVICE;}
 function isRemote(c){return !!c.owner&&c.owner!==DEVICE;}
 function claim(c){if(isRemote(c))return false;if(c.owner!==DEVICE){c.owner=DEVICE;c.claimedAt=Date.now();}c.ownerLabel=S.sync&&S.sync.label||'';c.updatedAt=Date.now();if(!SYNC.dirty.size)SYNC.dirtySince=Date.now();SYNC.dirty.add(c.id);return true;}
-function persist(){try{localStorage.setItem(GUEST?KEY+'.guest':KEY,JSON.stringify(S))}catch(e){}}
+function persist(){try{localStorage.setItem(skey(),JSON.stringify(S))}catch(e){}}
 function schedulePush(){if(GUEST||!syncOn())return;clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(pushNow,700);}
 function classBody(c){return {id:c.id,name:c.name,courts:c.courts,players:c.players,rounds:c.rounds,owner:c.owner,ownerLabel:c.ownerLabel||'',claimedAt:c.claimedAt||0,updatedAt:c.updatedAt||Date.now()};}
 /* Someone else now owns a class this device was editing. Nothing is thrown away: the local version is kept aside,
@@ -393,23 +395,29 @@ async function pushNow(){
     const mine=S.classes.filter(c=>c.owner===DEVICE&&SYNC.dirty.has(c.id));
     for(const c of mine){
       // conflict check before writing: has another device taken this class since I claimed it?
-      const g=await fetchT(syncUrl('classes/'+encodeURIComponent(c.id)),{cache:'no-store'},8000);
+      const g=await fetchT(syncUrl('classes/'+encodeURIComponent(c.id)),{cache:'no-store',headers:{'X-Firebase-ETag':'true'}},8000);
       if(!g.ok)throw new Error('HTTP '+g.status);
-      const remote=await g.json();
+      const etag=g.headers.get('ETag')||'null_etag';const remote=await g.json();SYNC.etags[c.id]=etag;
       if(c.owner!==DEVICE){SYNC.dirty.delete(c.id);continue;} // a pull handed it over while we waited
       if(remote&&remote.owner&&remote.owner!==DEVICE&&theyWin(c,remote)){stashConflict(c,normalizeClass(remote));if(!document.querySelector('.modal-bg'))render();continue;}
       SYNC.ac=new AbortController();const ac=SYNC.ac;const tm=setTimeout(()=>ac.abort(),8000);
       const sentAt=c.updatedAt;const body=JSON.stringify(classBody(c));
-      let r;try{r=await fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body,signal:ac.signal});}finally{clearTimeout(tm);SYNC.ac=null;}
+      // conditional write: only lands if nobody wrote since our GET (Firebase ETag / if-match). 412 = someone did → loop again and re-evaluate.
+      let r;try{r=await fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body,signal:ac.signal,headers:{'if-match':etag,'X-Firebase-ETag':'true'}});}finally{clearTimeout(tm);SYNC.ac=null;}
+      if(r.status===412){SYNC.pending=true;continue;}
       if(!r.ok)throw new Error('HTTP '+r.status);
-      SYNC.lastPushAt=Date.now();
+      SYNC.etags[c.id]=r.headers.get('ETag')||SYNC.etags[c.id];
+      SYNC.lastPushAt=Date.now();SYNC.bumpV=true;
       if(c.updatedAt===sentAt)SYNC.dirty.delete(c.id);else SYNC.pending=true; // edited while in flight: push again
     }
     if(SYNC.settingsDirty){
-      const r=await fetchT(syncUrl('settings'),{method:'PUT',body:JSON.stringify({settings:S.settings,meta:{name:S.meta.name,sub:S.meta.sub,matchMin:S.meta.matchMin,breakMin:S.meta.breakMin,startTime:S.meta.startTime},settingsAt:S.settingsAt||Date.now(),by:DEVICE,byLabel:S.sync.label||''})},8000);
+      const sAt=S.settingsAt||Date.now();
+      const r=await fetchT(syncUrl('settings'),{method:'PUT',body:JSON.stringify({settings:S.settings,meta:{name:S.meta.name,sub:S.meta.sub,matchMin:S.meta.matchMin,breakMin:S.meta.breakMin,startTime:S.meta.startTime},settingsAt:sAt,by:DEVICE,byLabel:S.sync.label||''})},8000);
       if(!r.ok)throw new Error('HTTP '+r.status);
-      SYNC.settingsDirty=false;SYNC.lastPushAt=Date.now();
+      if((S.settingsAt||sAt)===sAt)SYNC.settingsDirty=false;else SYNC.pending=true; // Setup saved again while in flight: send again
+      SYNC.lastPushAt=Date.now();SYNC.bumpV=true;
     }
+    if(SYNC.bumpV){SYNC.bumpV=false;await fetchT(syncUrl('v/'+encodeURIComponent(DEVICE)),{method:'PUT',body:JSON.stringify(Date.now())},8000);SYNC.knownV=null;} // per-writer stamp: any writer's bump changes the /v object
     SYNC.pushErr=false;SYNC.status='ok';SYNC.last=Date.now();SYNC.lastErr=null;
   }catch(e){if(!SYNC.selfAbort){SYNC.pushErr=true;SYNC.status='err';SYNC.lastErr=String(e.name==='AbortError'?'timeout':(e.message||e));}}
   finally{SYNC.pushing=false;SYNC.ac=null;}
@@ -418,7 +426,7 @@ async function pushNow(){
   else if(SYNC.pushErr&&(SYNC.dirty.size||SYNC.settingsDirty)){clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(pushNow,5000);}
 }
 /* last-ditch publish when the tab is hidden or closed (Safari tab kill, lap-1 finding c) */
-function pushKeepalive(){if(GUEST||!syncOn())return;try{S.classes.filter(c=>c.owner===DEVICE&&SYNC.dirty.has(c.id)).forEach(c=>{fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body:JSON.stringify(classBody(c)),keepalive:true}).catch(()=>{});});}catch(e){}}
+function pushKeepalive(){if(GUEST||!syncOn())return;if(SYNC.pushErr||Date.now()-(SYNC.lastPull||0)>12000)return; /* blind PUT is only safe right after a fresh pull confirmed ownership (panel finding) */ try{S.classes.filter(c=>c.owner===DEVICE&&SYNC.dirty.has(c.id)).forEach(c=>{if(!SYNC.etags[c.id])return;fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body:JSON.stringify(classBody(c)),keepalive:true,headers:{'if-match':SYNC.etags[c.id]}}).catch(()=>{});});}catch(e){}}
 function normalizeClass(r){
   r.courts=Array.isArray(r.courts)?r.courts:Object.values(r.courts||{});
   r.players=Array.isArray(r.players)?r.players:Object.values(r.players||{});
@@ -429,9 +437,14 @@ async function pullNow(){
   if(!syncOn()||SYNC.pulling)return;
   SYNC.pulling=true;const t0=Date.now();
   try{
+    // cheap change check first (~20 bytes): only download the whole event when someone published since our last look
+    const vr=await fetchT(syncUrl('v'),{cache:'no-store'},8000);
+    if(!vr.ok)throw new Error('HTTP '+vr.status);
+    const v=JSON.stringify(await vr.json());
+    if(v!=='null'&&v===SYNC.knownV&&SYNC.everPulled){SYNC.lastPull=Date.now();if(!SYNC.pushErr){SYNC.status='ok';SYNC.lastErr=null;}SYNC.last=Date.now();if((SYNC.dirty.size||SYNC.settingsDirty)&&!SYNC.pushing)pushNow();SYNC.pulling=false;paintSyncDot();return;}
     const r=await fetchT(syncUrl(''),{cache:'no-store'},8000);
     if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json()||{};const classes=data.classes||{};
+    const data=await r.json()||{};const classes=data.classes||{};SYNC.knownV=v;SYNC.everPulled=true;SYNC.lastPull=Date.now();
     let changed=false;
     Object.values(classes).forEach(raw=>{
       if(!raw||!raw.id)return;const rc=normalizeClass(raw);
@@ -1031,7 +1044,7 @@ function openSettings(){
     bg.querySelector('[data-act2="guestopen"]').addEventListener('click',()=>{window.open(guestUrl(),'_blank');});
     bg.querySelectorAll('[data-act2="takeover"]').forEach(b=>b.addEventListener('click',async()=>{const k=S.classes.find(x=>x.id===b.dataset.id);close();
       // fetch the cloud copy first: this device may have missed the owner's last pushes (backgrounded tab, wifi). Never publish a stale copy over fresher scores.
-      let remote=null,fetched=false;try{const g=await fetchT(syncUrl('classes/'+encodeURIComponent(k.id)),{cache:'no-store'},8000);if(g.ok){const j=await g.json();if(j&&j.id){remote=normalizeClass(j);fetched=true;}}}catch(e){}
+      let remote=null,fetched=false;try{const g=await fetchT(syncUrl('classes/'+encodeURIComponent(k.id)),{cache:'no-store',headers:{'X-Firebase-ETag':'true'}},8000);if(g.ok){SYNC.etags[k.id]=g.headers.get('ETag')||'null_etag';const j=await g.json();if(j&&j.id){remote=normalizeClass(j);fetched=true;}}}catch(e){}
       if(remote&&(remote.updatedAt||0)>(k.updatedAt||0)){Object.assign(k,{name:remote.name,courts:remote.courts,players:remote.players,rounds:remote.rounds,updatedAt:remote.updatedAt});persist();}
       const last=(remote||k).updatedAt?new Date((remote||k).updatedAt).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'unknown';
       confirmBox('Take over '+k.name+'?',(fetched?'Latest published update from '+(k.ownerLabel||'the other iPad')+': '+last+'. ':'Could not reach the cloud just now, taking over from the copy on this iPad (last update '+last+'). ')+'This iPad then runs '+k.name+'. If the other iPad has unpublished changes it keeps them aside and can take back; the later take-over wins.','Take over',()=>{snapshot();k.owner=DEVICE;k.ownerLabel=S.sync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();if(S.conflicts)delete S.conflicts[k.id];if(!SYNC.dirty.size)SYNC.dirtySince=Date.now();SYNC.dirty.add(k.id);save();pushNow();render();toast(k.name+' now runs on this iPad');},true);}));
