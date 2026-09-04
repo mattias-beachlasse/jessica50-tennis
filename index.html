@@ -334,7 +334,7 @@ function freshState(){
   const mk=(names,active)=>names.map(n=>({id:uid(),name:n,active}));
   return {
     v:1,
-    meta:{name:'Jessica 50 · Tennis',sub:'Castiglion del Bosco · Saturday 5 September',startTime:'10:00',matchMin:15,breakMin:3},
+    meta:{name:'Jessica 50 · Tennis',sub:'Castiglion del Bosco · Saturday 5 September',startTime:'10:00',matchMin:10,breakMin:0},
     settings:{scoring:'points',winPts:2,drawPts:1,byeComp:'average',drawMode:'americano',rankBy:'total'},
     classes:[
       {id:'men',name:'Men',courts:['Court 1','Court 2'],players:[...mk(ROSTER.men,true),...mk(ROSTER.menOff,false)],rounds:[],timer:null},
@@ -1006,7 +1006,7 @@ function openSettings(){
     <div><div class="eyebrow" style="margin-bottom:6px">Players who sit out a round</div>${radio('byeComp',s.byeComp,[['average','Get the round average','Fair when numbers don’t divide by four.'],['none','Get nothing','Ranking is then best combined with “average per match”.']])}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Rank by</div>${radio('rankBy',s.rankBy,[['total','Total','Most points (or wins) over the day.'],['avg','Average per match','Fairer if people arrive late or leave early.']])}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Draw</div>${radio('drawMode',s.drawMode,[['americano','Americano · random','New partners every round, never the same partner twice when avoidable.'],['balanced','Random but even','Random fours, then paired so the two teams are as equal as possible on current standings. Round 1 is pure random.'],['mexicano','Mexicano · by standings','1st & 4th vs 2nd & 3rd, then the next four. Tighter matches late in the day.']])}</div>
-    <div><div class="eyebrow" style="margin-bottom:6px">Appearance</div><select class="input" name="theme"><option value="">Follow device</option><option value="dark" ${localStorage.getItem('courtside.theme')==='dark'?'selected':''}>Dark (courtside)</option><option value="light" ${localStorage.getItem('courtside.theme')==='light'?'selected':''}>Light (limestone)</option></select></div>
+    <div><div class="eyebrow" style="margin-bottom:6px">Appearance</div><select class="input" name="theme"><option value="light" ${(localStorage.getItem('courtside.theme')||'light')==='light'?'selected':''}>Light (limestone)</option><option value="dark" ${localStorage.getItem('courtside.theme')==='dark'?'selected':''}>Dark (courtside)</option><option value="auto" ${localStorage.getItem('courtside.theme')==='auto'?'selected':''}>Follow device</option></select></div>
     <div class="hr"></div>
     <div><div class="eyebrow" style="margin-bottom:6px">Sync between iPads</div>
       <div class="grid2"><label class="field">Event code (same on every device)<input class="input" name="synccode" value="${esc(S.sync.code||'jessica50')}"></label><label class="field">This iPad's name<input class="input" name="synclabel" value="${esc(S.sync.label||'')}" placeholder="e.g. Men’s iPad"></label></div>
@@ -1027,7 +1027,7 @@ function openSettings(){
       S.meta.name=g('name').trim()||'Tournament';S.meta.sub=g('sub').trim();S.meta.startTime=g('startTime')||'10:00';S.meta.matchMin=Math.max(1,Number(g('matchMin'))||15);S.meta.breakMin=Math.max(0,Number(g('breakMin'))||0);
       ['scoring','byeComp','rankBy','drawMode'].forEach(n=>S.settings[n]=bg.querySelector(`[name="${n}"]:checked`).value);
       S.settings.winPts=Number(g('winPts'))||0;S.settings.drawPts=Number(g('drawPts'))||0;
-      const th=g('theme');try{if(th)localStorage.setItem('courtside.theme',th);else localStorage.removeItem('courtside.theme');}catch(e){}applyTheme();
+      const th=g('theme')||'light';try{localStorage.setItem('courtside.theme',th);}catch(e){}applyTheme();
       const code=(g('synccode')||'jessica50').trim().toLowerCase().replace(/[^a-z0-9-]/g,'');
       if(code.length<6){toast('Event code needs at least 6 characters');return;}
       const codeChanged=code!==S.sync.code;
@@ -1055,7 +1055,7 @@ function openSettings(){
     bg.querySelector('[data-act2="reset"]').addEventListener('click',()=>{close();confirmBox('Start over?','Deletes every player, round and result on this device'+(S.classes.some(k=>k.owner===DEVICE)?', and clears the classes this iPad runs for every other device too':'')+'.','Delete everything',()=>{snapshot();const keepSync=S.sync;const mine=S.classes.filter(k=>k.owner===DEVICE).map(k=>k.id);S=freshState();S.sync=keepSync;const keepChosen=S.ui&&S.ui.chosen;S.classes.forEach(k=>{if(mine.includes(k.id)){k.owner=DEVICE;k.ownerLabel=keepSync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();SYNC.dirty.add(k.id);}});S.ui.chosen=keepChosen;save();pushNow();render();toast('Fresh start');},true);});
   });
 }
-function applyTheme(){let t=null;try{t=localStorage.getItem('courtside.theme')}catch(e){}if(t)document.documentElement.setAttribute('data-theme',t);else document.documentElement.removeAttribute('data-theme');requestAnimationFrame(paintAll);}
+function applyTheme(){let t=null;try{t=localStorage.getItem('courtside.theme')}catch(e){}t=t||'light'; /* light (limestone) is the default; 'auto' follows the device */ if(t==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',t);requestAnimationFrame(paintAll);}
 
 /* ---------------- actions ---------------- */
 document.addEventListener('click',e=>{
