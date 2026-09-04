@@ -337,10 +337,10 @@ function freshState(){
     meta:{name:'Jessica 50 · Tennis',sub:'Castiglion del Bosco · Saturday 5 September',startTime:'10:00',matchMin:10,breakMin:0},
     settings:{scoring:'points',winPts:2,drawPts:1,byeComp:'average',drawMode:'americano',rankBy:'total'},
     classes:[
-      {id:'men',name:'Men',courts:['Court 1','Court 2'],players:[...mk(ROSTER.men,true),...mk(ROSTER.menOff,false)],rounds:[],timer:null},
-      {id:'women',name:'Women',courts:['Court 3'],players:mk(ROSTER.women,true),rounds:[],timer:null}
+      {id:'women',name:'Women',courts:['Court 1'],players:mk(ROSTER.women,true),rounds:[],timer:null},
+      {id:'men',name:'Men',courts:['Court 2','Court 3'],players:[...mk(ROSTER.men,true),...mk(ROSTER.menOff,false)],rounds:[],timer:null}
     ],
-    ui:{cls:'men',view:'players',round:{}}
+    ui:{cls:'women',view:'players',round:{}}
   };
 }
 const URLP=new URLSearchParams(location.search);
@@ -528,13 +528,9 @@ function generateDraw(players,courts,hist,mode,rankOrder,rnd){
   const n=players.length;
   const playing=Math.min(Math.floor(n/4)*4,4*courts.length);
   if(playing<4)return null;
-  // who sits: those who have played the most (fewest byes) sit first, ties random
-  // Fisher-Yates first (a comparator shuffle is biased: measured 2026-09-04, first names on the list sat out 4% more), then a stable sort by rest balance
-  const shuffled=players.slice();for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
-  shuffled.sort((a,b)=>(b.played-b.byes)-(a.played-a.byes));
-  const sitters=shuffled.slice(0,n-playing).map(p=>p.id);
-  let pool=players.filter(p=>!sitters.includes(p.id)).map(p=>p.id);
-  let best=null,bestCost=Infinity;
+  // who sits: those who have played the most (fewest byes) sit first, ties random.
+  // Fisher-Yates first (a comparator shuffle is biased: measured 2026-09-04, first names on the list sat out 4% more), then a stable sort by rest balance.
+  // The sitter set matters for partner variety (11 players on one court: 7 sit, 4 play), so several tie-shuffles are tried and the best overall draw kept.
   const pc=(a,b)=>((hist.partner[a]||{})[b]||0);
   const oc=(a,b)=>((hist.opp[a]||{})[b]||0);
   const groupCost=g=>10*pc(g[0],g[1])**2+10*pc(g[2],g[3])**2+oc(g[0],g[2])**2+oc(g[0],g[3])**2+oc(g[1],g[2])**2+oc(g[1],g[3])**2;
@@ -542,31 +538,39 @@ function generateDraw(players,courts,hist,mode,rankOrder,rnd){
   // strength for the balanced mode: rank position, best = n. No results yet → everyone equal → pure random.
   const str={};(rankOrder||[]).forEach((id,i)=>str[id]=rankOrder.length-i);
   const hasResults=Object.keys(hist.partner).length>0;
-  if(mode==='mexicano'){
-    // order by current rank, chunk into fours: 1&4 vs 2&3
-    const order=rankOrder.filter(id=>pool.includes(id));
-    const groups=[];for(let i=0;i<order.length;i+=4){const g=order.slice(i,i+4);groups.push([g[0],g[3],g[1],g[2]]);}
-    best=groups;
-  }else if(mode==='balanced'&&hasResults){
-    // random fours, but inside each four pick the pairing that makes the two teams most equal in strength (plus repeat penalties). A partner repeat (10) trades against 10 rank places of imbalance.
-    const trials=Math.min(1500,200+pool.length*60);
-    const pairings=g=>[[g[0],g[1],g[2],g[3]],[g[0],g[2],g[1],g[3]],[g[0],g[3],g[1],g[2]]];
-    const bal=g=>Math.abs((str[g[0]]||0)+(str[g[1]]||0)-(str[g[2]]||0)-(str[g[3]]||0));
-    for(let t=0;t<trials;t++){
-      const p=pool.slice();for(let i=p.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[p[i],p[j]]=[p[j],p[i]];}
-      const groups=[];let c=0;
-      for(let i=0;i<p.length;i+=4){let bg=null,bc=Infinity;pairings(p.slice(i,i+4)).forEach(g=>{const gc=groupCost(g)+bal(g);if(gc<bc){bc=gc;bg=g;}});groups.push(bg);c+=bc;}
-      if(c<bestCost){bestCost=c;best=groups;if(c===0)break;}
-    }
-  }else{
-    const trials=Math.min(1500,200+pool.length*60);
-    for(let t=0;t<trials;t++){
-      const p=pool.slice();for(let i=p.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[p[i],p[j]]=[p[j],p[i]];}
-      const groups=[];for(let i=0;i<p.length;i+=4)groups.push(p.slice(i,i+4));
-      const c=cost(groups);
-      if(c<bestCost){bestCost=c;best=groups;if(c===0)break;}
+  const pickSitters=()=>{const sh=players.slice();for(let i=sh.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[sh[i],sh[j]]=[sh[j],sh[i]];}sh.sort((a,b)=>(b.played-b.byes)-(a.played-a.byes));return sh.slice(0,n-playing).map(p=>p.id);};
+  let best=null,bestCost=Infinity,bestSitters=null;
+  const sitterTries=n-playing>0?12:1;
+  for(let st=0;st<sitterTries&&bestCost>0;st++){
+    const sitters=pickSitters();
+    const pool=players.filter(p=>!sitters.includes(p.id)).map(p=>p.id);
+    if(mode==='mexicano'){
+      // order by current rank, chunk into fours: 1&4 vs 2&3
+      const order=rankOrder.filter(id=>pool.includes(id));
+      const groups=[];for(let i=0;i<order.length;i+=4){const g=order.slice(i,i+4);groups.push([g[0],g[3],g[1],g[2]]);}
+      best=groups;bestSitters=sitters;bestCost=0;break;
+    }else if(mode==='balanced'&&hasResults){
+      // random fours, but inside each four pick the pairing that makes the two teams most equal in strength (plus repeat penalties). A partner repeat (10) trades against 10 rank places of imbalance.
+      const trials=Math.min(400,80+pool.length*20);
+      const pairings=g=>[[g[0],g[1],g[2],g[3]],[g[0],g[2],g[1],g[3]],[g[0],g[3],g[1],g[2]]];
+      const bal=g=>Math.abs((str[g[0]]||0)+(str[g[1]]||0)-(str[g[2]]||0)-(str[g[3]]||0));
+      for(let t=0;t<trials;t++){
+        const p=pool.slice();for(let i=p.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[p[i],p[j]]=[p[j],p[i]];}
+        const groups=[];let c=0;
+        for(let i=0;i<p.length;i+=4){let bg=null,bc=Infinity;pairings(p.slice(i,i+4)).forEach(g=>{const gc=groupCost(g)+bal(g);if(gc<bc){bc=gc;bg=g;}});groups.push(bg);c+=bc;}
+        if(c<bestCost){bestCost=c;best=groups;bestSitters=sitters;}
+      }
+    }else{
+      const trials=Math.min(400,80+pool.length*20);
+      for(let t=0;t<trials;t++){
+        const p=pool.slice();for(let i=p.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[p[i],p[j]]=[p[j],p[i]];}
+        const groups=[];for(let i=0;i<p.length;i+=4)groups.push(p.slice(i,i+4));
+        const c=cost(groups);
+        if(c<bestCost){bestCost=c;best=groups;bestSitters=sitters;if(c===0)break;}
+      }
     }
   }
+  const sitters=bestSitters;
   const matches=best.map((g,i)=>({id:uid(),court:courts[i]||('Court '+(i+1)),time:null,a:[g[0],g[1]],b:[g[2],g[3]],sa:null,sb:null,winner:null}));
   return {matches,byes:sitters};
 }
@@ -802,11 +806,6 @@ function renderPlayers(c){
       <div class="courts">${c.courts.map((k,i)=>`<span class="court-chip"><span data-act="renamecourt" data-i="${i}" style="cursor:text">${esc(k)}</span><button data-act="delcourt" data-i="${i}" title="Remove court">${I.x}</button></span>`).join('')||'<span class="muted">No courts yet</span>'}</div>
       <div class="muted" style="font-size:13px">${active} playing · ${onCourt} on court per round${sit?` · <b style="color:var(--clay)">${sit} sit out each round</b>`:''}${active&&active<4?' · <b style="color:var(--danger)">need 4 to draw</b>':''}</div>
     </div>
-    <div class="card stack" style="gap:10px">
-      <div class="eyebrow">Add players</div>
-      <textarea class="input" id="newnames" placeholder="One name per line (paste a whole list)"></textarea>
-      <button class="btn primary" data-act="addplayers">Add to ${esc(c.name)}</button>
-    </div>
     <div class="card">
       <div class="row between" style="margin-bottom:6px"><div class="eyebrow">Players · ${c.players.length}</div><div class="muted" style="font-size:12px">Toggle off = sits out until switched back</div></div>
       <div class="plist">${c.players.length?c.players.map((p,i)=>`<div class="prow ${p.active?'':'off'}">
@@ -816,6 +815,11 @@ function renderPlayers(c){
         <button class="toggle ${p.active?'on':''}" data-act="toggle" data-id="${p.id}" role="switch" aria-checked="${p.active}" aria-label="Playing"></button>
         <button class="iconbtn" data-act="delplayer" data-id="${p.id}" title="Remove">${I.trash}</button>
       </div>`).join(''):'<div class="empty"><h3>No players yet</h3>Paste the list above. You can add or remove people at any time, even mid-tournament.</div>'}</div>
+    </div>
+    <div class="card stack" style="gap:10px">
+      <div class="eyebrow">Add players</div>
+      <textarea class="input" id="newnames" placeholder="One name per line (paste a whole list)"></textarea>
+      <button class="btn primary" data-act="addplayers">Add to ${esc(c.name)}</button>
     </div>
     ${c.players.length>=4?`<button class="btn accent block" data-act="view" data-v="rounds">Go to rounds →</button>`:''}
   </div>`;
