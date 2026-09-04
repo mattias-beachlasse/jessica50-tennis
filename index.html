@@ -256,6 +256,15 @@ header.top .top-inner{position:relative;z-index:1;padding-top:clamp(56px,11vw,12
 .pod.p1{background:linear-gradient(180deg,var(--accent-soft),var(--surface) 80%)}
 .roundhead h2{font-style:italic}
 .empty h3{font-style:italic}
+table.results{width:100%;border-collapse:collapse}
+table.results td{padding:9px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.results tr:last-child td{border-bottom:0}
+table.results td.rn{color:var(--muted);font-family:"Cormorant Garamond",serif;font-size:15px;width:36px;white-space:nowrap}
+table.results td.ct{color:var(--clay);font-size:10px;letter-spacing:.18em;text-transform:uppercase;white-space:nowrap;width:70px}
+table.results td.tm{font-family:"Cormorant Garamond",Georgia,serif;font-size:18px;line-height:1.1}
+table.results td.tm.l{text-align:right}
+table.results td.tm.w{font-weight:700;color:var(--accent)}
+table.results td.sc{font-family:"Cormorant Garamond",Georgia,serif;font-size:22px;font-weight:600;white-space:nowrap;text-align:center;width:80px}
 .syncdot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--line2);margin-right:4px;vertical-align:middle}
 .syncdot.ok{background:var(--live)}.syncdot.err{background:var(--danger)}.syncdot.off{background:var(--line2)}.syncdot.pending{background:var(--accent);animation:blink 1s steps(2) infinite}
 .robanner{display:flex;flex-direction:column;gap:4px;border-color:var(--accent);margin-bottom:16px}
@@ -893,7 +902,17 @@ function renderStandings(c){
       ${open===r.id?`<tr class="expand"><td colspan="7">${renderHistory(c,r.id)}</td></tr>`:''}`}).join('')}
     </tbody></table></div>
     <div class="muted" style="font-size:12px;text-align:center">${rankNote()}. Tap a player for their day.</div>
+    ${renderResults(c)}
   </div>`;
+}
+function renderResults(c){
+  const mode=S.settings.scoring;
+  const rows=[];
+  c.rounds.slice().reverse().forEach(r=>{r.matches.forEach(m=>{if(!isDone(m))return;const s=scoreOf(m);const w=s.winner;
+    rows.push(`<tr><td class="rn">R${r.n}</td><td class="ct">${esc(m.court)}</td><td class="tm l ${w==='a'?'w':''}">${m.a.map(id=>esc(pname(c,id))).join(' & ')}</td><td class="sc">${mode==='wins'?(w==='a'?'W – L':w==='b'?'L – W':'D'):`${fmt(Number(m.sa))} – ${fmt(Number(m.sb))}`}</td><td class="tm ${w==='b'?'w':''}">${m.b.map(id=>esc(pname(c,id))).join(' & ')}</td></tr>`);});});
+  if(!rows.length)return '';
+  return `<div class="card tablewrap"><div class="row between" style="margin-bottom:6px"><div class="eyebrow">Results · ${rows.length} match${rows.length===1?'':'es'} played</div><span class="muted" style="font-size:12px">latest first</span></div>
+    <table class="results"><tbody>${rows.join('')}</tbody></table></div>`;
 }
 function renderHistory(c,id){
   const out=[];
