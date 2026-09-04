@@ -382,22 +382,35 @@ function generateDraw(players,courts,hist,mode,rankOrder,rnd){
   const playing=Math.min(Math.floor(n/4)*4,4*courts.length);
   if(playing<4)return null;
   // who sits: those who have played the most (fewest byes) sit first, ties random
-  const shuffled=players.slice().sort(()=>rnd()-.5);
+  // Fisher-Yates first (a comparator shuffle is biased: measured 2026-09-04, first names on the list sat out 4% more), then a stable sort by rest balance
+  const shuffled=players.slice();for(let i=shuffled.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];}
   shuffled.sort((a,b)=>(b.played-b.byes)-(a.played-a.byes));
   const sitters=shuffled.slice(0,n-playing).map(p=>p.id);
   let pool=players.filter(p=>!sitters.includes(p.id)).map(p=>p.id);
   let best=null,bestCost=Infinity;
   const pc=(a,b)=>((hist.partner[a]||{})[b]||0);
   const oc=(a,b)=>((hist.opp[a]||{})[b]||0);
-  const cost=groups=>{let c=0;groups.forEach(g=>{
-    c+=10*pc(g[0],g[1])**2+10*pc(g[2],g[3])**2;
-    c+=oc(g[0],g[2])**2+oc(g[0],g[3])**2+oc(g[1],g[2])**2+oc(g[1],g[3])**2;
-  });return c;};
+  const groupCost=g=>10*pc(g[0],g[1])**2+10*pc(g[2],g[3])**2+oc(g[0],g[2])**2+oc(g[0],g[3])**2+oc(g[1],g[2])**2+oc(g[1],g[3])**2;
+  const cost=groups=>groups.reduce((c,g)=>c+groupCost(g),0);
+  // strength for the balanced mode: rank position, best = n. No results yet → everyone equal → pure random.
+  const str={};(rankOrder||[]).forEach((id,i)=>str[id]=rankOrder.length-i);
+  const hasResults=Object.keys(hist.partner).length>0;
   if(mode==='mexicano'){
     // order by current rank, chunk into fours: 1&4 vs 2&3
     const order=rankOrder.filter(id=>pool.includes(id));
     const groups=[];for(let i=0;i<order.length;i+=4){const g=order.slice(i,i+4);groups.push([g[0],g[3],g[1],g[2]]);}
     best=groups;
+  }else if(mode==='balanced'&&hasResults){
+    // random fours, but inside each four pick the pairing that makes the two teams most equal in strength (plus repeat penalties). A partner repeat (10) trades against 10 rank places of imbalance.
+    const trials=Math.min(1500,200+pool.length*60);
+    const pairings=g=>[[g[0],g[1],g[2],g[3]],[g[0],g[2],g[1],g[3]],[g[0],g[3],g[1],g[2]]];
+    const bal=g=>Math.abs((str[g[0]]||0)+(str[g[1]]||0)-(str[g[2]]||0)-(str[g[3]]||0));
+    for(let t=0;t<trials;t++){
+      const p=pool.slice();for(let i=p.length-1;i>0;i--){const j=Math.floor(rnd()*(i+1));[p[i],p[j]]=[p[j],p[i]];}
+      const groups=[];let c=0;
+      for(let i=0;i<p.length;i+=4){let bg=null,bc=Infinity;pairings(p.slice(i,i+4)).forEach(g=>{const gc=groupCost(g)+bal(g);if(gc<bc){bc=gc;bg=g;}});groups.push(bg);c+=bc;}
+      if(c<bestCost){bestCost=c;best=groups;if(c===0)break;}
+    }
   }else{
     const trials=Math.min(1500,200+pool.length*60);
     for(let t=0;t<trials;t++){
@@ -840,7 +853,7 @@ function openSettings(){
     <div class="grid2"><label class="field">Win bonus<input class="input" type="number" name="winPts" value="${s.winPts}"></label><label class="field">Draw bonus<input class="input" type="number" name="drawPts" value="${s.drawPts}"></label></div>
     <div><div class="eyebrow" style="margin-bottom:6px">Players who sit out a round</div>${radio('byeComp',s.byeComp,[['average','Get the round average','Fair when numbers don’t divide by four.'],['none','Get nothing','Ranking is then best combined with “average per match”.']])}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Rank by</div>${radio('rankBy',s.rankBy,[['total','Total','Most points (or wins) over the day.'],['avg','Average per match','Fairer if people arrive late or leave early.']])}</div>
-    <div><div class="eyebrow" style="margin-bottom:6px">Draw</div>${radio('drawMode',s.drawMode,[['americano','Americano · random','New partners every round, never the same partner twice when avoidable.'],['mexicano','Mexicano · by standings','1st & 4th vs 2nd & 3rd, then the next four. Tighter matches late in the day.']])}</div>
+    <div><div class="eyebrow" style="margin-bottom:6px">Draw</div>${radio('drawMode',s.drawMode,[['americano','Americano · random','New partners every round, never the same partner twice when avoidable.'],['balanced','Random but even','Random fours, then paired so the two teams are as equal as possible on current standings. Round 1 is pure random.'],['mexicano','Mexicano · by standings','1st & 4th vs 2nd & 3rd, then the next four. Tighter matches late in the day.']])}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Appearance</div><select class="input" name="theme"><option value="">Follow device</option><option value="dark" ${localStorage.getItem('courtside.theme')==='dark'?'selected':''}>Dark (courtside)</option><option value="light" ${localStorage.getItem('courtside.theme')==='light'?'selected':''}>Light (limestone)</option></select></div>
     <div class="hr"></div>
     <div class="row"><button class="btn sm" data-act2="print">Print / PDF day sheet</button><button class="btn sm" data-act2="chime">Test the chime</button></div>
