@@ -223,7 +223,7 @@ body.screen{overflow:hidden}
 .stab td.v{text-align:right;font-weight:600;font-family:"Cormorant Garamond",serif}
 .stab td.s{text-align:right;color:var(--muted);font-size:clamp(9px,.85vw,13px);letter-spacing:.12em;text-transform:uppercase}
 .stab tr.top1 td{color:var(--accent)}
-.sfoot{display:flex;justify-content:space-between;align-items:center;gap:20px;border-top:1px solid var(--line);padding-top:1.2vh;font-size:clamp(10px,1vw,15px);letter-spacing:.08em;color:var(--muted)}
+.sfoot{display:flex;justify-content:space-between;align-items:center;gap:20px;border-top:1px solid var(--line);padding-top:1.2vh;font-size:clamp(12px,1.25vw,18px);letter-spacing:.08em;color:var(--muted)}
 .sfoot b{color:var(--text);font-weight:500}
 #screen .exit{position:absolute;top:10px;right:10px;opacity:.45;transition:opacity .2s}
 #screen:hover .exit,#screen .exit:focus-within{opacity:1}
@@ -248,7 +248,7 @@ header.top .top-inner{position:relative;z-index:1;padding-top:clamp(56px,11vw,12
 .stab table{border:1px solid var(--line);border-radius:var(--radius)}
 .stab td{padding:.42vh .7vw;font-size:clamp(12px,1.15vw,19px)}
 .stab td.n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:14vw}
-.stab td.s{font-size:clamp(9px,.75vw,12px)}
+.stab td.s{font-size:clamp(10.5px,.8vw,13px)}
 .sfoot{background:color-mix(in srgb,var(--surface) 86%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:var(--radius);padding:1vh 1.2vw}
 .scls .ct{background:transparent}
 /* phones (guest view): let the page scroll instead of squeezing tables into the viewport */
@@ -259,7 +259,7 @@ header.top .top-inner{position:relative;z-index:1;padding-top:clamp(56px,11vw,12
 .syncdot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--line2);margin-right:4px;vertical-align:middle}
 .syncdot.ok{background:var(--live)}.syncdot.err{background:var(--danger)}.syncdot.off{background:var(--line2)}
 .robanner{display:flex;flex-direction:column;gap:4px;border-color:var(--accent);margin-bottom:16px}
-main.ro [data-act]:not([data-act="round"]):not([data-act="open"]):not([data-act="view"]):not([data-act="copy"]):not([data-act="share"]):not([data-act="print"]):not([data-act="settings"]),main.ro input,main.ro textarea{pointer-events:none;opacity:.55}
+main.ro [data-act]:not([data-act="round"]):not([data-act="open"]):not([data-act="view"]):not([data-act="copy"]):not([data-act="share"]):not([data-act="print"]):not([data-act="settings"]):not([data-act="takeback"]):not([data-act="dropmine"]),main.ro input,main.ro textarea{pointer-events:none;opacity:.55}
 
 /* ---------- ceremony ---------- */
 .cer{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:3vh;cursor:pointer;padding:2vh 0;-webkit-tap-highlight-color:transparent;user-select:none}
@@ -357,30 +357,65 @@ function save(){try{localStorage.setItem(GUEST?KEY+'.guest':KEY,JSON.stringify(S
    and can "take over" if the owning iPad dies. Guests open ?live for a read-only big screen. Everything keeps working
    with no network; sync simply resumes when it returns. */
 const DB='https://jessica50-tennis-default-rtdb.europe-west1.firebasedatabase.app';
-const SYNC={code:null,on:true,status:'off',last:0,lastErr:null,pushT:null,pushing:false,pullT:null,dirty:new Set()};
+const SYNC={status:'off',last:0,lastErr:null,pushT:null,pushing:false,pending:false,pulling:false,pullT:null,dirty:new Set(),settingsDirty:false,lastPushAt:0,pushErr:false};
 function syncOn(){return GUEST||!(S.sync&&S.sync.on===false);}
 function syncCode(){return (S.sync&&S.sync.code||'jessica50').trim().toLowerCase().replace(/[^a-z0-9-]/g,'');}
-function syncUrl(path){return `${DB}/events/${encodeURIComponent(syncCode())}/${path}.json`;}
+function syncUrl(path){return `${DB}/events/${encodeURIComponent(syncCode())}${path?'/'+path:''}.json`;}
+/* every request has a deadline: a hung request must never wedge the push loop (lap-1 finding g) */
+function fetchT(url,opts,ms){const ac=new AbortController();const t=setTimeout(()=>ac.abort(),ms||8000);return fetch(url,{...(opts||{}),signal:ac.signal}).finally(()=>clearTimeout(t));}
 function ownsClass(c){return !c.owner||c.owner===DEVICE;}
+/* who yields when two devices both think they own a class: the later claim wins; identical timestamps break on device id so both sides agree */
+function theyWin(c,remote){const ru=remote.updatedAt||0,mc=c.claimedAt||0;if(ru>mc)return true;if(ru<mc)return false;return String(remote.owner)<DEVICE;}
 function isRemote(c){return !!c.owner&&c.owner!==DEVICE;}
-function claim(c){if(isRemote(c))return false;c.owner=DEVICE;c.ownerLabel=S.sync&&S.sync.label||'';c.updatedAt=Date.now();SYNC.dirty.add(c.id);return true;}
+function claim(c){if(isRemote(c))return false;if(c.owner!==DEVICE){c.owner=DEVICE;c.claimedAt=Date.now();}c.ownerLabel=S.sync&&S.sync.label||'';c.updatedAt=Date.now();SYNC.dirty.add(c.id);return true;}
+function persist(){try{localStorage.setItem(GUEST?KEY+'.guest':KEY,JSON.stringify(S))}catch(e){}}
 function schedulePush(){if(GUEST||!syncOn())return;clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(pushNow,700);}
-async function pushNow(){
-  if(GUEST||SYNC.pushing||!syncOn())return;
-  const mine=S.classes.filter(c=>c.owner===DEVICE);if(!mine.length)return;
-  SYNC.pushing=true;
-  try{
-    for(const c of mine){
-      const body={id:c.id,name:c.name,courts:c.courts,players:c.players,rounds:c.rounds,owner:c.owner,ownerLabel:c.ownerLabel||'',updatedAt:c.updatedAt||Date.now(),
-        settings:S.settings,meta:{name:S.meta.name,sub:S.meta.sub,matchMin:S.meta.matchMin,breakMin:S.meta.breakMin,startTime:S.meta.startTime}};
-      const r=await fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body:JSON.stringify(body)});
-      if(!r.ok)throw new Error('HTTP '+r.status);
-      SYNC.dirty.delete(c.id);
-    }
-    SYNC.status='ok';SYNC.last=Date.now();SYNC.lastErr=null;
-  }catch(e){SYNC.status='err';SYNC.lastErr=String(e.message||e);}
-  SYNC.pushing=false;paintSyncDot();
+function classBody(c){return {id:c.id,name:c.name,courts:c.courts,players:c.players,rounds:c.rounds,owner:c.owner,ownerLabel:c.ownerLabel||'',claimedAt:c.claimedAt||0,updatedAt:c.updatedAt||Date.now()};}
+/* Someone else now owns a class this device was editing. Nothing is thrown away: the local version is kept aside,
+   the banner offers "take back and publish" or "discard". (lap-1 findings a, b, b2, d) */
+function stashConflict(local,remote){
+  S.conflicts=S.conflicts||{};
+  if(local.owner!==DEVICE)return; // already handed over (pull and push can race on reconnect); keep the first stash
+  if(!S.conflicts[local.id])S.conflicts[local.id]={at:Date.now(),theirs:remote.ownerLabel||'the other iPad',mine:JSON.parse(JSON.stringify({name:local.name,courts:local.courts,players:local.players,rounds:local.rounds}))};
+  Object.assign(local,{name:remote.name,courts:remote.courts,players:remote.players,rounds:remote.rounds,owner:remote.owner,ownerLabel:remote.ownerLabel||'',claimedAt:remote.claimedAt||0,updatedAt:remote.updatedAt});
+  SYNC.dirty.delete(local.id);persist();
+  toast(local.name+': '+(remote.ownerLabel||'the other iPad')+' took over. Your unpublished changes are kept, see the banner.');
+  try{if(navigator.vibrate)navigator.vibrate([200,100,200]);}catch(e){}
 }
+async function pushNow(){
+  if(GUEST||!syncOn())return;
+  if(SYNC.pushing){SYNC.pending=true;if(SYNC.ac){SYNC.selfAbort=true;SYNC.ac.abort();}return;} // a newer edit supersedes the in-flight PUT: abort it and restart
+  SYNC.pushing=true;SYNC.selfAbort=false;
+  try{
+    const mine=S.classes.filter(c=>c.owner===DEVICE&&SYNC.dirty.has(c.id));
+    for(const c of mine){
+      // conflict check before writing: has another device taken this class since I claimed it?
+      const g=await fetchT(syncUrl('classes/'+encodeURIComponent(c.id)),{cache:'no-store'},8000);
+      if(!g.ok)throw new Error('HTTP '+g.status);
+      const remote=await g.json();
+      if(c.owner!==DEVICE){SYNC.dirty.delete(c.id);continue;} // a pull handed it over while we waited
+      if(remote&&remote.owner&&remote.owner!==DEVICE&&theyWin(c,remote)){stashConflict(c,normalizeClass(remote));if(!document.querySelector('.modal-bg'))render();continue;}
+      SYNC.ac=new AbortController();const ac=SYNC.ac;const tm=setTimeout(()=>ac.abort(),8000);
+      const sentAt=c.updatedAt;const body=JSON.stringify(classBody(c));
+      let r;try{r=await fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body,signal:ac.signal});}finally{clearTimeout(tm);SYNC.ac=null;}
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      SYNC.lastPushAt=Date.now();
+      if(c.updatedAt===sentAt)SYNC.dirty.delete(c.id);else SYNC.pending=true; // edited while in flight: push again
+    }
+    if(SYNC.settingsDirty){
+      const r=await fetchT(syncUrl('settings'),{method:'PUT',body:JSON.stringify({settings:S.settings,meta:{name:S.meta.name,sub:S.meta.sub,matchMin:S.meta.matchMin,breakMin:S.meta.breakMin,startTime:S.meta.startTime},settingsAt:S.settingsAt||Date.now(),by:DEVICE,byLabel:S.sync.label||''})},8000);
+      if(!r.ok)throw new Error('HTTP '+r.status);
+      SYNC.settingsDirty=false;SYNC.lastPushAt=Date.now();
+    }
+    SYNC.pushErr=false;SYNC.status='ok';SYNC.last=Date.now();SYNC.lastErr=null;
+  }catch(e){if(!SYNC.selfAbort){SYNC.pushErr=true;SYNC.status='err';SYNC.lastErr=String(e.name==='AbortError'?'timeout':(e.message||e));}}
+  finally{SYNC.pushing=false;SYNC.ac=null;}
+  paintSyncDot();
+  if(SYNC.pending){SYNC.pending=false;setTimeout(pushNow,SYNC.selfAbort?50:300);}
+  else if(SYNC.pushErr&&(SYNC.dirty.size||SYNC.settingsDirty)){clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(pushNow,5000);}
+}
+/* last-ditch publish when the tab is hidden or closed (Safari tab kill, lap-1 finding c) */
+function pushKeepalive(){if(GUEST||!syncOn())return;try{S.classes.filter(c=>c.owner===DEVICE&&SYNC.dirty.has(c.id)).forEach(c=>{fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body:JSON.stringify(classBody(c)),keepalive:true}).catch(()=>{});});}catch(e){}}
 function normalizeClass(r){
   r.courts=Array.isArray(r.courts)?r.courts:Object.values(r.courts||{});
   r.players=Array.isArray(r.players)?r.players:Object.values(r.players||{});
@@ -388,39 +423,53 @@ function normalizeClass(r){
   r.timer=null;return r;
 }
 async function pullNow(){
-  if(!syncOn())return;
+  if(!syncOn()||SYNC.pulling)return;
+  SYNC.pulling=true;const t0=Date.now();
   try{
-    const r=await fetch(syncUrl('classes'),{cache:'no-store'});
+    const r=await fetchT(syncUrl(''),{cache:'no-store'},8000);
     if(!r.ok)throw new Error('HTTP '+r.status);
-    const data=await r.json()||{};
-    let changed=false;let newestRemote=null;
-    Object.values(data).forEach(raw=>{
+    const data=await r.json()||{};const classes=data.classes||{};
+    let changed=false;
+    Object.values(classes).forEach(raw=>{
       if(!raw||!raw.id)return;const rc=normalizeClass(raw);
       const local=S.classes.find(c=>c.id===rc.id);
       if(rc.owner===DEVICE&&!GUEST){
-        // ours. Adopt only if this device has lost its data (fresh install) and the cloud copy is richer.
-        if(local&&!local.rounds.length&&rc.rounds.length&&!SYNC.dirty.has(rc.id)){Object.assign(local,{name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,updatedAt:rc.updatedAt});changed=true;}
+        // lost-data recovery only (fresh install): local empty, cloud richer AND newer, nothing pending, and no push since this request started
+        if(local&&!local.rounds.length&&rc.rounds.length&&!SYNC.dirty.has(rc.id)&&(rc.updatedAt||0)>(local.updatedAt||0)&&SYNC.lastPushAt<t0){Object.assign(local,{name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,claimedAt:rc.claimedAt||0,updatedAt:rc.updatedAt});changed=true;}
         return;
       }
-      if(!newestRemote||(rc.updatedAt||0)>(newestRemote.updatedAt||0))newestRemote=rc;
       if(local){
-        if((local.updatedAt||0)===(rc.updatedAt||0)&&local.owner===rc.owner)return;
-        Object.assign(local,{name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,owner:rc.owner,ownerLabel:rc.ownerLabel||'',updatedAt:rc.updatedAt});changed=true;
-      }else{S.classes.push({id:rc.id,name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,owner:rc.owner,ownerLabel:rc.ownerLabel||'',updatedAt:rc.updatedAt,timer:null});changed=true;}
+        if(local.owner===DEVICE&&!GUEST){
+          // another device took over a class I was running. Newer than my claim → their word stands, mine is kept aside. Older → I took over after them, my next push wins.
+          if(theyWin(local,rc)){stashConflict(local,rc);changed=true;}
+          else{SYNC.dirty.add(local.id);} // I claimed later: reassert by pushing again
+          return;
+        }
+        if(local.owner===rc.owner&&(rc.updatedAt||0)<=(local.updatedAt||0))return; // same or stale response
+        Object.assign(local,{name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,owner:rc.owner,ownerLabel:rc.ownerLabel||'',claimedAt:rc.claimedAt||0,updatedAt:rc.updatedAt});changed=true;
+      }else{S.classes.push({id:rc.id,name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,owner:rc.owner,ownerLabel:rc.ownerLabel||'',claimedAt:rc.claimedAt||0,updatedAt:rc.updatedAt,timer:null});changed=true;}
     });
-    // a device that owns nothing (guest, or an iPad before its first draw) follows the other device's settings and meta
-    if(newestRemote&&!S.classes.some(c=>c.owner===DEVICE)&&newestRemote.settings){
-      const before=JSON.stringify([S.settings,S.meta]);
-      S.settings={...S.settings,...newestRemote.settings};if(newestRemote.meta)S.meta={...S.meta,...newestRemote.meta};
-      if(JSON.stringify([S.settings,S.meta])!==before)changed=true;
+    // shared event settings: whoever saved Setup last, on any device, sets "what counts", minutes, draw mode for everyone (lap-1 finding 4)
+    if(data.settings&&(data.settings.settingsAt||0)>(S.settingsAt||0)&&!SYNC.settingsDirty){
+      S.settings={...S.settings,...(data.settings.settings||{})};if(data.settings.meta)S.meta={...S.meta,...data.settings.meta};S.settingsAt=data.settings.settingsAt;changed=true;
     }
-    SYNC.status='ok';SYNC.last=Date.now();SYNC.lastErr=null;
-    if(changed){try{localStorage.setItem(GUEST?KEY+'.guest':KEY,JSON.stringify(S))}catch(e){}if(!document.querySelector('.modal-bg')&&!document.activeElement.matches('input,textarea'))render();}
-  }catch(e){SYNC.status='err';SYNC.lastErr=String(e.message||e);}
+    if(!SYNC.pushErr){SYNC.status='ok';SYNC.lastErr=null;}SYNC.last=Date.now();
+    if(changed){persist();if(!document.querySelector('.modal-bg')&&!(document.activeElement&&document.activeElement.matches('input,textarea')))render();}
+    if((SYNC.dirty.size||SYNC.settingsDirty)&&!SYNC.pushing)pushNow();
+  }catch(e){SYNC.status='err';SYNC.lastErr=String(e.name==='AbortError'?'timeout':(e.message||e));}
+  finally{SYNC.pulling=false;}
   paintSyncDot();
 }
-function paintSyncDot(){document.querySelectorAll('[data-syncdot]').forEach(el=>{const on=syncOn();el.className='syncdot '+(on?SYNC.status:'off');el.title=!on?'Sync off':SYNC.status==='ok'?'Synced '+new Date(SYNC.last).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):SYNC.status==='err'?'Sync error: '+SYNC.lastErr+' (working locally, will retry)':'Connecting…';});}
-function startSync(){clearInterval(SYNC.pullT);SYNC.pullT=setInterval(pullNow,GUEST?3000:4000);pullNow();if(!GUEST){setInterval(()=>{S.classes.forEach(c=>{if(c.owner===DEVICE)SYNC.dirty.add(c.id)});pushNow();},30000);}}
+function paintSyncDot(){document.querySelectorAll('[data-syncdot]').forEach(el=>{const on=syncOn();const st=!on?'off':SYNC.status==='ok'&&!SYNC.pushErr?'ok':SYNC.status==='off'?'off':'err';el.className='syncdot '+st;el.title=!on?'Sync off':st==='ok'?'Synced '+new Date(SYNC.last).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):SYNC.status==='off'?'Connecting…':'Sync problem: '+(SYNC.lastErr||'')+' (working locally, retrying)';});}
+function startSync(){
+  clearInterval(SYNC.pullT);SYNC.pullT=setInterval(pullNow,GUEST?3000:4000);
+  if(!GUEST){S.classes.forEach(c=>{if(c.owner===DEVICE)SYNC.dirty.add(c.id)});pushNow();}
+  pullNow();
+  if(!GUEST&&!SYNC.periodic){SYNC.periodic=setInterval(()=>{S.classes.forEach(c=>{if(c.owner===DEVICE)SYNC.dirty.add(c.id)});pushNow();},30000);
+    window.addEventListener('online',()=>{pullNow();pushNow();});
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){pullNow();pushNow();}else pushKeepalive();});
+    window.addEventListener('pagehide',pushKeepalive);}
+}
 const MUTATING=new Set(['addcourt','renamecourt','delcourt','addplayers','rename','toggle','delplayer','draw','reshuffle','delround','tstart','tpause','treset','win','clear','swap','roundtime','mtime','score']);
 function commit(){history.push(JSON.stringify(S));if(history.length>30)history.shift();save();render();}
 function undo(){if(!history.length){toast('Nothing to undo');return}S=JSON.parse(history.pop());save();render();toast('Undone');}
@@ -570,8 +619,7 @@ function standings(c,uptoRound){
   const mode=S.settings.scoring,rankBy=S.settings.rankBy;
   rows.sort((x,y)=>{
     if(rankBy==='avg'){if(y.avg!==x.avg)return y.avg-x.avg;}
-    if(mode==='wins'){if(y.wins!==x.wins)return y.wins-x.wins;if(y.diff!==x.diff)return y.diff-x.diff;}
-    else{if(y.total!==x.total)return y.total-x.total;if(y.wins!==x.wins)return y.wins-x.wins;if(y.diff!==x.diff)return y.diff-x.diff;}
+    if(y.total!==x.total)return y.total-x.total;if(y.wins!==x.wins)return y.wins-x.wins;if(y.diff!==x.diff)return y.diff-x.diff;
     if(x.played!==y.played)return x.played-y.played;
     return x.name.localeCompare(y.name);
   });
@@ -585,7 +633,7 @@ let audioCtx=null,alarmDone={};
 /* iOS only lets audio play after a tap: create + resume the context inside the Start tap, and prime it with a silent buffer */
 function unlockAudio(){
   try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
-    if(audioCtx.state==='suspended')audioCtx.resume();
+    if(audioCtx.state!=='running')audioCtx.resume();
     const b=audioCtx.createBuffer(1,1,22050),s=audioCtx.createBufferSource();s.buffer=b;s.connect(audioCtx.destination);s.start(0);
   }catch(e){}
 }
@@ -714,7 +762,7 @@ function render(){
     </div>
     <div class="row between"><div class="seg" role="tablist">${S.classes.map(k=>`<button role="tab" data-act="cls" data-id="${k.id}" class="${k.id===c.id?'on':''}">${esc(k.name)} <span class="muted" style="font-weight:500">${k.players.filter(p=>p.active).length}</span></button>`).join('')}<button class="add" data-act="addcls" title="Add a class">+</button></div></div>
   </div></header>
-  <main class="${isRemote(c)?'ro':''}">${isRemote(c)?`<div class="card robanner"><span class="eyebrow" style="color:var(--accent)">Live from ${esc(c.ownerLabel||'the other iPad')}</span><span class="muted" style="font-size:13px">Read-only here, updates every few seconds. Take over in Setup if that iPad dies.</span></div>`:''}${views[S.ui.view](c)}</main>
+  <main class="${isRemote(c)?'ro':''}">${S.conflicts&&S.conflicts[c.id]?`<div class="card robanner" style="border-color:var(--danger)"><span class="eyebrow" style="color:var(--danger)">Your unpublished changes to ${esc(c.name)} were set aside</span><span class="muted" style="font-size:13px">${esc(S.conflicts[c.id].theirs)} took over at ${new Date(S.conflicts[c.id].at).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'})}. Nothing is lost: you can take ${esc(c.name)} back and publish your version (theirs is then set aside on their iPad), or drop yours.</span><div class="row" style="margin-top:6px"><button class="btn sm danger" data-act="takeback">Take back and publish mine</button><button class="btn sm" data-act="dropmine">Drop mine, keep theirs</button></div></div>`:''}${isRemote(c)?`<div class="card robanner"><span class="eyebrow" style="color:var(--accent)">Live from ${esc(c.ownerLabel||'the other iPad')}</span><span class="muted" style="font-size:13px">Read-only here, updates every few seconds. Take over in Setup if that iPad dies.</span></div>`:''}${views[S.ui.view](c)}</main>
   <nav class="bottom"><div class="wrap">
     ${[['players','Players',I.players],['rounds','Rounds',I.rounds],['standings','Standings',I.stand],['screen','Big screen',I.screen]].map(([v,l,ic])=>`<button data-act="view" data-v="${v}" class="${S.ui.view===v?'on':''}">${ic}<span>${l}</span></button>`).join('')}
     <button data-act="settings">${I.gear}<span>Setup</span></button>
@@ -814,13 +862,13 @@ function renderStandings(c){
   return `<div class="stack">
     <div class="row between"><div><div class="eyebrow">${esc(c.name)} · after ${done} complete round${done===1?'':'s'}</div><h2 style="font-size:30px">Standings</h2></div>
       <div class="row"><button class="btn sm" data-act="copy">Copy</button><button class="btn sm" data-act="share">Share</button><button class="btn sm" data-act="print">Print</button></div></div>
-    ${done?`<div class="podium">${[1,0,2].map(i=>top[i]?`<div class="pod p${i+1}"><div class="place">${['1st','2nd','3rd'][i]}</div><div class="pname">${esc(top[i].name)}</div><div class="pts">${mode==='wins'?top[i].wins+'W':fmt(top[i].total)}</div></div>`:'').join('')}</div>`:''}
+    ${done?`<div class="podium">${[1,0,2].map(i=>top[i]?`<div class="pod p${i+1}"><div class="place">${['1st','2nd','3rd'][i]}</div><div class="pname">${esc(top[i].name)}</div><div class="pts">${mode==='wins'?fmt(top[i].total)+'W':fmt(top[i].total)}</div></div>`:'').join('')}</div>`:''}
     <div class="card tablewrap"><table class="stand"><thead><tr><th>#</th><th>Player</th><th>P</th><th>W</th>${mode==='wins'?'':'<th>For</th>'}<th>+/-</th><th>${mode==='wins'?'Wins':S.settings.rankBy==='avg'?'Avg':'Total'}</th></tr></thead><tbody>
     ${rows.map(r=>{const mv=prevRank[r.id]?prevRank[r.id]-r.rank:0;return `<tr class="${r.rank===1&&done?'top1':''} ${r.active?'':'off'}" data-act="open" data-id="${r.id}" style="cursor:pointer">
-      <td class="r">${r.rank}<span class="mv ${mv>0?'up':mv<0?'dn':''}">${mv>0?'▲':mv<0?'▼':''}</span></td><td class="n">${esc(r.name)}${r.active?'':' <span class="muted" style="font-size:12px">(out)</span>'}</td><td>${r.played}</td><td>${r.wins}${r.draws?`<span class="muted">+${r.draws}d</span>`:''}</td>${mode==='wins'?'':`<td>${fmt(r.pf)}${r.bonus?`<span class="muted" title="bye compensation">+${fmt(r.bonus)}</span>`:''}</td>`}<td>${r.diff>0?'+':''}${fmt(r.diff)}</td><td class="tot">${mode==='wins'?r.wins:S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total)}</td></tr>
+      <td class="r">${r.rank}<span class="mv ${mv>0?'up':mv<0?'dn':''}">${mv>0?'▲':mv<0?'▼':''}</span></td><td class="n">${esc(r.name)}${r.active?'':' <span class="muted" style="font-size:12px">(out)</span>'}</td><td>${r.played}</td><td>${r.wins}${r.draws?`<span class="muted">+${r.draws}d</span>`:''}</td>${mode==='wins'?'':`<td>${fmt(r.pf)}${r.bonus?`<span class="muted" title="bye compensation">+${fmt(r.bonus)}</span>`:''}</td>`}<td>${r.diff>0?'+':''}${fmt(r.diff)}</td><td class="tot">${S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total)}</td></tr>
       ${open===r.id?`<tr class="expand"><td colspan="7">${renderHistory(c,r.id)}</td></tr>`:''}`}).join('')}
     </tbody></table></div>
-    <div class="muted" style="font-size:12px;text-align:center">Ranked by ${mode==='wins'?'wins, then point difference':S.settings.rankBy==='avg'?'average per match':'total'+(mode==='both'?' (score + win bonus)':'')+', then wins, then difference'}${S.settings.byeComp==='average'?' · sit-outs receive the round average':''}. Tap a player for their day.</div>
+    <div class="muted" style="font-size:12px;text-align:center">Ranked by ${mode==='wins'?'wins (sit-outs get half a win), then difference':S.settings.rankBy==='avg'?'average per match':'total'+(mode==='both'?' (score + win bonus)':'')+', then wins, then difference'}${S.settings.byeComp==='average'?' · sit-outs receive the round average':''}. Tap a player for their day.</div>
   </div>`;
 }
 function renderHistory(c,id){
@@ -855,7 +903,7 @@ function renderScreen(){
           <div class="tm a ${w==='a'?'win':''}">${m.a.map(id=>esc(pname(c,id))).join('<br>')}</div>
           <div class="sc">${d?(mode==='wins'?(w==='a'?'W · L':'L · W'):`${m.sa}–${m.sb}`):'<span class="live">In play</span>'}</div>
           <div class="tm b ${w==='b'?'win':''}">${m.b.map(id=>esc(pname(c,id))).join('<br>')}</div></div>`}).join('')}</div>`:''}
-      <div class="stab ${rows.length>9?'two':''}">${(rows.length>9?[rows.slice(0,Math.ceil(rows.length/2)),rows.slice(Math.ceil(rows.length/2))]:[rows]).map(part=>`<table><tbody>${part.map(x=>`<tr class="${x.rank===1&&done?'top1':''}"><td class="r">${x.rank}</td><td class="n">${esc(x.name)}</td><td class="s">${x.played}p · ${x.wins}w</td><td class="v">${mode==='wins'?x.wins:S.settings.rankBy==='avg'?x.avg.toFixed(1):fmt(x.total)}</td></tr>`).join('')}</tbody></table>`).join('')}</div>
+      <div class="stab ${rows.length>9?'two':''}">${(rows.length>9?[rows.slice(0,Math.ceil(rows.length/2)),rows.slice(Math.ceil(rows.length/2))]:[rows]).map(part=>`<table><tbody>${part.map(x=>`<tr class="${x.rank===1&&done?'top1':''}"><td class="r">${x.rank}</td><td class="n">${esc(x.name)}</td><td class="s">${x.played}p · ${x.wins}w</td><td class="v">${S.settings.rankBy==='avg'?x.avg.toFixed(1):fmt(x.total)}</td></tr>`).join('')}</tbody></table>`).join('')}</div>
     </section>`;
   }).join('');
   const timers=classes.map(c=>{const r=c.rounds[c.rounds.length-1];if(!r)return '';const running=r.startedAt&&r.pausedLeft==null;return `<span class="stimer ${timerLeft(r)<=0&&running?'over':''}" data-timer="${c.rounds.length-1}" data-cls="${c.id}">${esc(c.name)} <span class="tt">${timerStr(r)}</span></span>`}).filter(Boolean).join(' · ');
@@ -903,7 +951,7 @@ function renderCeremony(){
   const step=Math.max(0,Math.min(4,st.step||0));
   const rows=standings(c).filter(r=>r.played>0);
   const mode=S.settings.scoring;
-  const val=r=>mode==='wins'?r.wins+(r.wins===1?' win':' wins'):S.settings.rankBy==='avg'?r.avg.toFixed(1)+' avg':fmt(r.total)+' pts';
+  const val=r=>mode==='wins'?fmt(r.total)+' wins':S.settings.rankBy==='avg'?r.avg.toFixed(1)+' avg':fmt(r.total)+' pts';
   const top=[rows[0],rows[1],rows[2]];
   let inner='';
   if(step===0){
@@ -965,7 +1013,8 @@ function openSettings(){
       const codeChanged=code!==S.sync.code;
       S.sync={code,label:g('synclabel').trim(),on:bg.querySelector('[name="syncon"]').checked};
       S.classes.forEach(k=>{if(k.owner===DEVICE){k.ownerLabel=S.sync.label;SYNC.dirty.add(k.id);}});
-      close();save();render();toast('Saved');
+      S.settingsAt=Date.now();SYNC.settingsDirty=true;
+      close();save();render();toast('Saved · settings apply on every device');
       if(codeChanged){S.classes.forEach(k=>{if(k.owner===DEVICE)SYNC.dirty.add(k.id)});}
       startSync();pushNow();
     });
@@ -973,12 +1022,12 @@ function openSettings(){
     bg.querySelector('[data-act2="guestshare"]').addEventListener('click',()=>{const u=guestUrl();if(navigator.share)navigator.share({title:S.meta.name+' · live',url:u}).catch(()=>{});else navigator.clipboard.writeText(u).then(()=>toast('Guest link copied')).catch(()=>toast(u));});
     bg.querySelector('[data-act2="guestcopy"]').addEventListener('click',()=>{navigator.clipboard.writeText(guestUrl()).then(()=>toast('Guest link copied')).catch(()=>toast(guestUrl()));});
     bg.querySelector('[data-act2="guestopen"]').addEventListener('click',()=>{window.open(guestUrl(),'_blank');});
-    bg.querySelectorAll('[data-act2="takeover"]').forEach(b=>b.addEventListener('click',()=>{const k=S.classes.find(x=>x.id===b.dataset.id);close();confirmBox('Take over '+k.name+'?','This iPad becomes the one that runs '+k.name+'. Only do this if the other iPad is gone; if both keep editing, the last one to save wins.','Take over',()=>{snapshot();k.owner=DEVICE;k.ownerLabel=S.sync.label||'';k.updatedAt=Date.now();SYNC.dirty.add(k.id);save();pushNow();render();toast(k.name+' now runs on this iPad');},true);}));
+    bg.querySelectorAll('[data-act2="takeover"]').forEach(b=>b.addEventListener('click',()=>{const k=S.classes.find(x=>x.id===b.dataset.id);close();confirmBox('Take over '+k.name+'?','This iPad becomes the one that runs '+k.name+'. Only do this if the other iPad is gone; if both keep editing, the last one to save wins.','Take over',()=>{snapshot();k.owner=DEVICE;k.ownerLabel=S.sync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();if(S.conflicts)delete S.conflicts[k.id];SYNC.dirty.add(k.id);save();pushNow();render();toast(k.name+' now runs on this iPad');},true);}));
     bg.querySelector('[data-act2="print"]').addEventListener('click',()=>{close();printSheet();});
     bg.querySelector('[data-act2="chime"]').addEventListener('click',()=>{beep();});
     bg.querySelector('[data-act2="backup"]').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(S));toast('Backup copied. Paste it somewhere safe.');}catch(e){toast('Clipboard blocked. Use a desktop browser.');}});
     bg.querySelector('[data-act2="restore"]').addEventListener('click',async()=>{try{const t=await navigator.clipboard.readText();const s=JSON.parse(t);if(!s.classes)throw 0;snapshot();S=s;save();close();render();toast('Restored');}catch(e){toast('Clipboard has no valid backup');}});
-    bg.querySelector('[data-act2="reset"]').addEventListener('click',()=>{close();confirmBox('Start over?','Deletes every player, round and result on this device'+(S.classes.some(k=>k.owner===DEVICE)?', and clears the classes this iPad runs for every other device too':'')+'.','Delete everything',()=>{snapshot();const keepSync=S.sync;const mine=S.classes.filter(k=>k.owner===DEVICE).map(k=>k.id);S=freshState();S.sync=keepSync;S.classes.forEach(k=>{if(mine.includes(k.id)){k.owner=DEVICE;k.ownerLabel=keepSync.label||'';k.updatedAt=Date.now();SYNC.dirty.add(k.id);}});save();pushNow();render();toast('Fresh start');},true);});
+    bg.querySelector('[data-act2="reset"]').addEventListener('click',()=>{close();confirmBox('Start over?','Deletes every player, round and result on this device'+(S.classes.some(k=>k.owner===DEVICE)?', and clears the classes this iPad runs for every other device too':'')+'.','Delete everything',()=>{snapshot();const keepSync=S.sync;const mine=S.classes.filter(k=>k.owner===DEVICE).map(k=>k.id);S=freshState();S.sync=keepSync;const keepChosen=S.ui&&S.ui.chosen;S.classes.forEach(k=>{if(mine.includes(k.id)){k.owner=DEVICE;k.ownerLabel=keepSync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();SYNC.dirty.add(k.id);}});S.ui.chosen=keepChosen;save();pushNow();render();toast('Fresh start');},true);});
   });
 }
 function applyTheme(){let t=null;try{t=localStorage.getItem('courtside.theme')}catch(e){}if(t)document.documentElement.setAttribute('data-theme',t);else document.documentElement.removeAttribute('data-theme');requestAnimationFrame(paintAll);}
@@ -1038,6 +1087,8 @@ document.addEventListener('click',e=>{
     case 'cerback':{const st=S.ui.cer||(S.ui.cer={step:0});if(st.step>0){st.step--;save();render();}break;}
     case 'cercls':{S.ui.cer={cls:el.dataset.id,step:0};save();render();break;}
     case 'print':printSheet();break;
+    case 'takeback':{const k=S.conflicts&&S.conflicts[c.id];if(!k)return;snapshot();Object.assign(c,k.mine);c.owner=DEVICE;c.ownerLabel=S.sync.label||'';c.claimedAt=Date.now();c.updatedAt=Date.now();delete S.conflicts[c.id];SYNC.dirty.add(c.id);save();pushNow();render();toast(c.name+' is back on this iPad, publishing');break;}
+    case 'dropmine':{if(S.conflicts)delete S.conflicts[c.id];save();render();toast('Kept the other iPad’s version');break;}
   }
 });
 document.addEventListener('change',e=>{
@@ -1069,7 +1120,7 @@ function printSheet(){
   let el=document.getElementById('print');if(!el){el=document.createElement('div');el.id='print';document.body.appendChild(el);}
   const classes=S.classes.filter(c=>c.rounds.length);
   if(!classes.length){toast('Nothing to print yet');return;}
-  const val=r=>mode==='wins'?r.wins:S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total);
+  const val=r=>S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total);
   el.innerHTML=`<h1>${esc(S.meta.name)}</h1><div class="psub">${esc(S.meta.sub)}</div>`+classes.map(c=>{
     const rows=standings(c);const done=c.rounds.filter(roundComplete).length;
     return `<section class="pclass"><h2>${esc(c.name)} · final standings</h2>
@@ -1085,13 +1136,18 @@ function printSheet(){
 
 function standingsText(c){
   const rows=standings(c);const mode=S.settings.scoring;
-  return `${S.meta.name} · ${c.name}\n`+rows.map(r=>`${r.rank}. ${r.name} · ${mode==='wins'?r.wins+' wins':fmt(r.total)+' pts'} (${r.played} pl, ${r.wins} w)`).join('\n');
+  return `${S.meta.name} · ${c.name}\n`+rows.map(r=>`${r.rank}. ${r.name} · ${mode==='wins'?fmt(r.total)+' wins':fmt(r.total)+' pts'} (${r.played} pl, ${r.wins} w)`).join('\n');
 }
 
 applyTheme();
 if(GUEST)S.ui.view='screen';
 render();
 startSync();
+if(!GUEST&&!S.ui.chosen&&!S.classes.some(k=>k.owner===DEVICE)){
+  setTimeout(()=>{modal(`<h2>Which class does this iPad run?</h2><p class="muted" style="margin:0 0 12px">The other class stays visible here, live and read-only. You can change this later in Setup.</p><div class="stack" style="gap:8px">${S.classes.map(k=>`<button class="btn block" data-pick="${k.id}">${esc(k.name)}</button>`).join('')}<button class="btn block ghost" data-pick="*">Both, on this iPad only</button></div>`,(bg,close)=>{
+    bg.querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.pick;S.ui.chosen=true;if(id!=='*'){S.ui.cls=id;const k=S.classes.find(x=>x.id===id);if(k&&!S.sync.label)S.sync.label=k.name+'’s iPad';}close();save();render();}));
+  });},400);
+}
 window.Courtside={generateDraw,standings,get state(){return S},set state(v){S=v;save();render();}};
 </script>
 
