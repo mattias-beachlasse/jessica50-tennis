@@ -268,7 +268,7 @@ table.results td.sc{font-family:"Cormorant Garamond",Georgia,serif;font-size:22p
 .syncdot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--line2);margin-right:4px;vertical-align:middle}
 .syncdot.ok{background:var(--live)}.syncdot.err{background:var(--danger)}.syncdot.off{background:var(--line2)}.syncdot.pending{background:var(--accent);animation:blink 1s steps(2) infinite}
 .robanner{display:flex;flex-direction:column;gap:4px;border-color:var(--accent);margin-bottom:16px}
-main.ro [data-act]:not([data-act="round"]):not([data-act="open"]):not([data-act="view"]):not([data-act="copy"]):not([data-act="share"]):not([data-act="print"]):not([data-act="settings"]):not([data-act="takeback"]):not([data-act="dropmine"]),main.ro input,main.ro textarea{pointer-events:none;opacity:.35;filter:grayscale(1)}
+main.ro [data-act]:not([data-act="round"]):not([data-act="open"]):not([data-act="view"]):not([data-act="copy"]):not([data-act="share"]):not([data-act="print"]):not([data-act="settings"]):not([data-act="takeback"]):not([data-act="dropmine"]):not([data-act="takeover"]),main.ro input,main.ro textarea{pointer-events:none;opacity:.35;filter:grayscale(1)}
 
 /* ---------- ceremony ---------- */
 .cer{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:3vh;cursor:pointer;padding:2vh 0;-webkit-tap-highlight-color:transparent;user-select:none}
@@ -367,7 +367,7 @@ function save(){try{localStorage.setItem(skey(),JSON.stringify(S))}catch(e){}sch
    and can "take over" if the owning iPad dies. Guests open ?live for a read-only big screen. Everything keeps working
    with no network; sync simply resumes when it returns. */
 const DB='https://jessica50-tennis-default-rtdb.europe-west1.firebasedatabase.app';
-const SYNC={status:'off',last:0,lastErr:null,pushT:null,pushing:false,pending:false,pulling:false,pullT:null,dirty:new Set(),settingsDirty:false,lastPushAt:0,pushErr:false,etags:{}};
+const SYNC={status:'off',last:0,lastErr:null,pushT:null,pushing:false,pending:false,pulling:false,pullT:null,dirty:new Set(),settingsDirty:false,lastPushAt:0,pushErr:false,etags:{},pubSig:{}};
 function syncOn(){return GUEST||!(S.sync&&S.sync.on===false);}
 function syncCode(){return (S.sync&&S.sync.code||'jessica50').trim().toLowerCase().replace(/[^a-z0-9-]/g,'');}
 function syncUrl(path){return `${DB}/events/${encodeURIComponent(syncCode())}${path?'/'+path:''}.json`;}
@@ -379,6 +379,7 @@ function ownsClass(c){return !c.owner||c.owner===DEVICE;}
 function theyWin(c,remote){const rc=remote.claimedAt||0,mc=c.claimedAt||0;if(rc>mc)return true;if(rc<mc)return false;return String(remote.owner)<DEVICE;}
 function isRemote(c){return !!c.owner&&c.owner!==DEVICE;}
 function claim(c){if(isRemote(c))return false;if(c.owner!==DEVICE){c.owner=DEVICE;c.claimedAt=Date.now();}c.ownerLabel=S.sync&&S.sync.label||'';c.updatedAt=Date.now();if(!SYNC.dirty.size)SYNC.dirtySince=Date.now();SYNC.dirty.add(c.id);return true;}
+function classSig(x){return JSON.stringify({p:x.players,c:x.courts,r:(x.rounds||[]).map(r=>({n:r.n,t:r.time,m:r.matches,b:r.byes}))});}
 function persist(){try{localStorage.setItem(skey(),JSON.stringify(S))}catch(e){}}
 function schedulePush(){if(GUEST||!syncOn())return;clearTimeout(SYNC.pushT);SYNC.pushT=setTimeout(pushNow,700);}
 function classBody(c){return {id:c.id,name:c.name,courts:c.courts,players:c.players,rounds:c.rounds,owner:c.owner,ownerLabel:c.ownerLabel||'',claimedAt:c.claimedAt||0,updatedAt:c.updatedAt||Date.now()};}
@@ -388,11 +389,11 @@ function stashConflict(local,remote){
   S.conflicts=S.conflicts||{};
   if(local.owner!==DEVICE)return; // already handed over (pull and push can race on reconnect); keep the first stash
   // keep my copy aside only if it actually differs from theirs (an edit of mine that their later PUT overwrote, or something unpublished); identical content → plain handover
-  const sig=x=>JSON.stringify({p:x.players,c:x.courts,r:x.rounds});
-  const unpublished=SYNC.dirty.has(local.id)||sig(local)!==sig(remote);
+  // "unpublished" = this device holds something it never got into the cloud: pending edits, or content that differs from what it last published (timer fields excluded)
+  const unpublished=SYNC.dirty.has(local.id)||(SYNC.pubSig[local.id]!=null&&classSig(local)!==SYNC.pubSig[local.id]);
   if(unpublished&&!S.conflicts[local.id])S.conflicts[local.id]={at:Date.now(),theirs:remote.ownerLabel||'the other iPad',mine:JSON.parse(JSON.stringify({name:local.name,courts:local.courts,players:local.players,rounds:local.rounds}))};
   Object.assign(local,{name:remote.name,courts:remote.courts,players:remote.players,rounds:remote.rounds,owner:remote.owner,ownerLabel:remote.ownerLabel||'',claimedAt:remote.claimedAt||0,updatedAt:remote.updatedAt});
-  SYNC.dirty.delete(local.id);persist();
+  SYNC.dirty.delete(local.id);SYNC.pubSig[local.id]=classSig(local);persist();
   toast(unpublished?local.name+': '+(remote.ownerLabel||'the other iPad')+' took over. Your unpublished changes are kept, see the banner.':(remote.ownerLabel||'The other iPad')+' now runs '+local.name+'.');
   try{if(navigator.vibrate)navigator.vibrate([200,100,200]);}catch(e){}
 }
@@ -415,7 +416,7 @@ async function pushNow(){
       let r;try{r=await fetch(syncUrl('classes/'+encodeURIComponent(c.id)),{method:'PUT',body,signal:ac.signal,headers:{'if-match':etag,'X-Firebase-ETag':'true'}});}finally{clearTimeout(tm);SYNC.ac=null;}
       if(r.status===412){SYNC.pending=true;continue;}
       if(!r.ok)throw new Error('HTTP '+r.status);
-      SYNC.etags[c.id]=r.headers.get('ETag')||SYNC.etags[c.id];
+      SYNC.etags[c.id]=r.headers.get('ETag')||SYNC.etags[c.id];SYNC.pubSig[c.id]=classSig(c);
       SYNC.lastPushAt=Date.now();SYNC.bumpV=true;
       if(c.updatedAt===sentAt)SYNC.dirty.delete(c.id);else SYNC.pending=true; // edited while in flight: push again
     }
@@ -471,7 +472,7 @@ async function pullNow(){
           return;
         }
         if(local.owner===rc.owner&&(rc.updatedAt||0)<=(local.updatedAt||0))return; // same or stale response
-        Object.assign(local,{name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,owner:rc.owner,ownerLabel:rc.ownerLabel||'',claimedAt:rc.claimedAt||0,updatedAt:rc.updatedAt});changed=true;
+        Object.assign(local,{name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,owner:rc.owner,ownerLabel:rc.ownerLabel||'',claimedAt:rc.claimedAt||0,updatedAt:rc.updatedAt});SYNC.pubSig[local.id]=classSig(local);changed=true;
       }else{S.classes.push({id:rc.id,name:rc.name,courts:rc.courts,players:rc.players,rounds:rc.rounds,owner:rc.owner,ownerLabel:rc.ownerLabel||'',claimedAt:rc.claimedAt||0,updatedAt:rc.updatedAt,timer:null});changed=true;}
     });
     // shared event settings: whoever saved Setup last, on any device, sets "what counts", minutes, draw mode for everyone (lap-1 finding 4)
@@ -795,7 +796,7 @@ function render(){
     </div>
     <div class="row between"><div class="seg" role="tablist">${S.classes.map(k=>`<button role="tab" data-act="cls" data-id="${k.id}" class="${k.id===c.id?'on':''}">${esc(k.name)} <span class="muted" style="font-weight:500">${k.players.filter(p=>p.active).length}</span></button>`).join('')}<button class="add" data-act="addcls" title="Add a class">+</button></div></div>
   </div></header>
-  <main class="${isRemote(c)?'ro':''}">${S.conflicts&&S.conflicts[c.id]?`<div class="card robanner" style="border-color:var(--danger)"><span class="eyebrow" style="color:var(--danger)">Your unpublished changes to ${esc(c.name)} were set aside</span><span class="muted" style="font-size:13px">${esc(S.conflicts[c.id].theirs)} took over at ${new Date(S.conflicts[c.id].at).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'})}. Nothing is lost: you can take ${esc(c.name)} back and publish your version (theirs is then set aside on their iPad), or drop yours.</span><div class="row" style="margin-top:6px"><button class="btn sm danger" data-act="takeback">Take back and publish mine</button><button class="btn sm" data-act="dropmine">Drop mine, keep theirs</button></div></div>`:''}${isRemote(c)?`<div class="card robanner"><span class="eyebrow" style="color:var(--accent)">Live from ${esc(c.ownerLabel||'the other iPad')}</span><span class="muted" style="font-size:13px">Read-only here, updates every few seconds. Take over in Setup if that iPad dies.</span></div>`:''}${views[S.ui.view](c)}</main>
+  <main>${S.conflicts&&S.conflicts[c.id]?`<div class="card robanner" style="border-color:var(--danger)"><span class="eyebrow" style="color:var(--danger)">Your unpublished changes to ${esc(c.name)} were set aside</span><span class="muted" style="font-size:13px">${esc(S.conflicts[c.id].theirs)} took over at ${new Date(S.conflicts[c.id].at).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit'})}. Nothing is lost: you can take ${esc(c.name)} back and publish your version (theirs is then set aside on their iPad), or drop yours.</span><div class="row" style="margin-top:6px"><button class="btn sm danger" data-act="takeback">Take back and publish mine</button><button class="btn sm" data-act="dropmine">Drop mine, keep theirs</button></div></div>`:''}${isRemote(c)?`<div class="card robanner"><span class="eyebrow" style="color:var(--accent)">Live from ${esc(c.ownerLabel||'the other device')}</span><span class="muted" style="font-size:13px">Updates every few seconds. Any edit here takes ${esc(c.name)} over to this device; avoid entering the same score from two devices at once.</span></div>`:''}${views[S.ui.view](c)}</main>
   <nav class="bottom"><div class="wrap">
     ${[['players','Players',I.players],['rounds','Rounds',I.rounds],['standings','Standings',I.stand],['screen','Big screen',I.screen]].map(([v,l,ic])=>`<button data-act="view" data-v="${v}" class="${S.ui.view===v?'on':''}">${ic}<span>${l}</span></button>`).join('')}
     <button data-act="settings">${I.gear}<span>Setup</span></button>
@@ -1065,18 +1066,21 @@ function openSettings(){
     bg.querySelector('[data-act2="guestshare"]').addEventListener('click',()=>{const u=guestUrl();if(navigator.share)navigator.share({title:S.meta.name+' · live',url:u}).catch(()=>{});else navigator.clipboard.writeText(u).then(()=>toast('Guest link copied')).catch(()=>toast(u));});
     bg.querySelector('[data-act2="guestcopy"]').addEventListener('click',()=>{navigator.clipboard.writeText(guestUrl()).then(()=>toast('Guest link copied')).catch(()=>toast(guestUrl()));});
     bg.querySelector('[data-act2="guestopen"]').addEventListener('click',()=>{window.open(guestUrl(),'_blank');});
-    bg.querySelectorAll('[data-act2="takeover"]').forEach(b=>b.addEventListener('click',async()=>{const k=S.classes.find(x=>x.id===b.dataset.id);close();
-      // fetch the cloud copy first: this device may have missed the owner's last pushes (backgrounded tab, wifi). Never publish a stale copy over fresher scores.
-      let remote=null,fetched=false;try{const g=await fetchT(syncUrl('classes/'+encodeURIComponent(k.id)),{cache:'no-store',headers:{'X-Firebase-ETag':'true'}},8000);if(g.ok){SYNC.etags[k.id]=g.headers.get('ETag')||'null_etag';const j=await g.json();if(j&&j.id){remote=normalizeClass(j);fetched=true;}}}catch(e){}
-      if(remote&&(remote.updatedAt||0)>(k.updatedAt||0)){Object.assign(k,{name:remote.name,courts:remote.courts,players:remote.players,rounds:remote.rounds,updatedAt:remote.updatedAt});persist();}
-      const last=(remote||k).updatedAt?new Date((remote||k).updatedAt).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'unknown';
-      confirmBox('Take over '+k.name+'?',(fetched?'Latest published update from '+(k.ownerLabel||'the other iPad')+': '+last+'. ':'Could not reach the cloud just now, taking over from the copy on this iPad (last update '+last+'). ')+'This iPad then runs '+k.name+'. If the other iPad has unpublished changes it keeps them aside and can take back; the later take-over wins.','Take over',()=>{snapshot();k.owner=DEVICE;k.ownerLabel=S.sync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();if(S.conflicts)delete S.conflicts[k.id];if(!SYNC.dirty.size)SYNC.dirtySince=Date.now();SYNC.dirty.add(k.id);save();pushNow();render();toast(k.name+' now runs on this iPad');},true);}));
+    bg.querySelectorAll('[data-act2="takeover"]').forEach(b=>b.addEventListener('click',()=>{close();takeOver(b.dataset.id);}));
     bg.querySelector('[data-act2="print"]').addEventListener('click',()=>{close();printSheet();});
     bg.querySelector('[data-act2="chime"]').addEventListener('click',()=>{beep();});
     bg.querySelector('[data-act2="backup"]').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(JSON.stringify(S));toast('Backup copied. Paste it somewhere safe.');}catch(e){toast('Clipboard blocked. Use a desktop browser.');}});
     bg.querySelector('[data-act2="restore"]').addEventListener('click',async()=>{try{const t=await navigator.clipboard.readText();const s=JSON.parse(t);if(!s.classes)throw 0;snapshot();S=s;save();close();render();toast('Restored');}catch(e){toast('Clipboard has no valid backup');}});
     bg.querySelector('[data-act2="reset"]').addEventListener('click',()=>{close();confirmBox('Start over?','Deletes every player, round and result on this device'+(S.classes.some(k=>k.owner===DEVICE)?', and clears the classes this iPad runs for every other device too':'')+'.','Delete everything',()=>{snapshot();const keepSync=S.sync;const mine=S.classes.filter(k=>k.owner===DEVICE).map(k=>k.id);S=freshState();S.sync=keepSync;const keepChosen=S.ui&&S.ui.chosen;S.classes.forEach(k=>{if(mine.includes(k.id)){k.owner=DEVICE;k.ownerLabel=keepSync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();SYNC.dirty.add(k.id);}});S.ui.chosen=keepChosen;save();pushNow();render();toast('Fresh start');},true);});
   });
+}
+/* take over a class that another device runs: fetch the cloud copy first so we never publish a stale one, then claim */
+async function takeOver(id){
+  const k=S.classes.find(x=>x.id===id);if(!k)return;
+  let remote=null,fetched=false;try{const g=await fetchT(syncUrl('classes/'+encodeURIComponent(k.id)),{cache:'no-store',headers:{'X-Firebase-ETag':'true'}},8000);if(g.ok){SYNC.etags[k.id]=g.headers.get('ETag')||'null_etag';const j=await g.json();if(j&&j.id){remote=normalizeClass(j);fetched=true;}}}catch(e){}
+  if(remote&&(remote.updatedAt||0)>(k.updatedAt||0)){Object.assign(k,{name:remote.name,courts:remote.courts,players:remote.players,rounds:remote.rounds,updatedAt:remote.updatedAt});persist();}
+  const last=(remote||k).updatedAt?new Date((remote||k).updatedAt).toLocaleTimeString('sv-SE',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'unknown';
+  confirmBox('Take over '+k.name+'?',(fetched?'Latest published update from '+(k.ownerLabel||'the other device')+': '+last+'. ':'Could not reach the cloud just now, taking over from the copy on this device (last update '+last+'). ')+'This device then runs '+k.name+'. If the other device has unpublished changes it keeps them aside and can take back; the later take-over wins.','Take over',()=>{snapshot();k.owner=DEVICE;k.ownerLabel=S.sync.label||'';k.claimedAt=Date.now();k.updatedAt=Date.now();if(S.conflicts)delete S.conflicts[k.id];if(!SYNC.dirty.size)SYNC.dirtySince=Date.now();SYNC.dirty.add(k.id);S.ui.chosen=true;save();pushNow();render();toast(k.name+' now runs on this device');},true);
 }
 function applyTheme(){let t=null;try{t=localStorage.getItem('courtside.theme')}catch(e){}t=t||'light'; /* light (limestone) is the default; 'auto' follows the device */ if(t==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',t);requestAnimationFrame(paintAll);}
 
@@ -1086,8 +1090,8 @@ document.addEventListener('click',e=>{
   const act=el.dataset.act;const c=cls();
   if(MUTATING.has(act)){
     if(GUEST){toast('Guest view is read-only');return;}
-    if(isRemote(c)){toast(c.name+' is run on the other iPad. Take over in Setup if needed.');return;}
-    claim(c);
+    if(isRemote(c)){const from=c.ownerLabel||'the other device';c.owner=null;claim(c);if(S.conflicts)delete S.conflicts[c.id];toast(c.name+' now runs on this device (was '+from+')');}
+    else claim(c);
   }
   const roundIdx=()=>Math.min(S.ui.round[c.id]??c.rounds.length-1,c.rounds.length-1);
   const findMatch=id=>{for(const r of c.rounds){const m=r.matches.find(x=>x.id===id);if(m)return {r,m};}return {};};
@@ -1135,6 +1139,7 @@ document.addEventListener('click',e=>{
     case 'cerback':{const st=S.ui.cer||(S.ui.cer={step:0});if(st.step>0){st.step--;save();render();}break;}
     case 'cercls':{S.ui.cer={cls:el.dataset.id,step:0};save();render();break;}
     case 'print':printSheet();break;
+    case 'takeover':takeOver(el.dataset.id);break;
     case 'takeback':{const k=S.conflicts&&S.conflicts[c.id];if(!k)return;snapshot();Object.assign(c,k.mine);c.owner=DEVICE;c.ownerLabel=S.sync.label||'';c.claimedAt=Date.now();c.updatedAt=Date.now();delete S.conflicts[c.id];SYNC.dirty.add(c.id);save();pushNow();render();toast(c.name+' is back on this iPad, publishing');break;}
     case 'dropmine':{if(S.conflicts)delete S.conflicts[c.id];save();render();toast('Kept the other iPad’s version');break;}
   }
@@ -1143,8 +1148,8 @@ document.addEventListener('change',e=>{
   const el=e.target.closest('[data-act]');if(!el)return;const c=cls();
   if(MUTATING.has(el.dataset.act)){
     if(GUEST){toast('Guest view is read-only');return;}
-    if(isRemote(c)){toast(c.name+' is run on the other iPad.');render();return;}
-    claim(c);
+    if(isRemote(c)){const from=c.ownerLabel||'the other device';c.owner=null;claim(c);if(S.conflicts)delete S.conflicts[c.id];toast(c.name+' now runs on this device (was '+from+')');}
+    else claim(c);
   }
   const findMatch=id=>{for(const r of c.rounds){const m=r.matches.find(x=>x.id===id);if(m)return {r,m};}return {};};
   switch(el.dataset.act){
@@ -1191,11 +1196,7 @@ applyTheme();
 if(GUEST)S.ui.view='screen';
 render();
 startSync();
-if(!GUEST&&!S.ui.chosen&&!S.classes.some(k=>k.owner===DEVICE)){
-  setTimeout(()=>{modal(`<h2>Which class does this iPad run?</h2><p class="muted" style="margin:0 0 12px">The other class stays visible here, live and read-only. You can change this later in Setup.</p><div class="stack" style="gap:8px">${S.classes.map(k=>`<button class="btn block" data-pick="${k.id}">${esc(k.name)}</button>`).join('')}<button class="btn block ghost" data-pick="*">Both, on this iPad only</button></div>`,(bg,close)=>{
-    bg.querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>{const id=b.dataset.pick;S.ui.chosen=true;if(id!=='*'){S.ui.cls=id;const k=S.classes.find(x=>x.id===id);if(k&&!S.sync.label)S.sync.label=k.name+'’s iPad';}close();save();render();}));
-  });},400);
-}
+/* any device runs any class: no first-launch chooser (editing a class moves it to the device you're holding) */
 window.Courtside={generateDraw,standings,get state(){return S},set state(v){S=v;save();render();}};
 </script>
 
