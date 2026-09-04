@@ -86,6 +86,8 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:10.5px;letter-s
 .chip.live{color:var(--live)}
 .chip.done{color:var(--accent)}
 .chip.clay{color:var(--clay)}
+.rankchip{cursor:pointer;font-family:"Jost",sans-serif;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;font-weight:500;padding:6px 10px;color:var(--muted)}
+.rankchip.on{background:var(--text);color:var(--bg);border-color:var(--text)}
 .hr{height:1px;background:var(--line);margin:4px 0}
 .toast{position:fixed;left:50%;bottom:92px;transform:translateX(-50%) translateY(10px);background:var(--text);color:var(--bg);padding:10px 18px;border-radius:2px;font-weight:500;font-size:12px;letter-spacing:.08em;opacity:0;pointer-events:none;transition:all .2s;z-index:50;max-width:90vw;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -645,12 +647,21 @@ function standings(c,uptoRound){
   const rows=c.players.map(p=>{
     const s=st[p.id];const bonus=comp[p.id]||0;
     const total=s.pf+bonus;
-    return {id:p.id,name:p.name,active:p.active,...s,bonus,total,diff:s.pf-s.pa,avg:s.played?s.pf/s.played:0};
+    return {id:p.id,name:p.name,active:p.active,...s,bonus,total,diff:s.pf-s.pa,avg:s.played?s.pf/s.played:0,ratio:(s.pf+s.pa)?s.pf/(s.pf+s.pa):0,winsPlus:s.wins+0.5*s.draws};
   });
   const mode=S.settings.scoring,rankBy=S.settings.rankBy;
+  // ranking systems (a view on the same results, switchable any time):
+  //  total  = points won + sit-out compensation, then wins, then difference
+  //  wins   = wins first (draw = half), then points, then difference
+  //  diff   = points won minus points lost, then wins
+  //  ratio  = share of points won, pf/(pf+pa), then wins; players without a match go last
+  //  avg    = points per match played, then wins
   rows.sort((x,y)=>{
-    if(rankBy==='avg'){if(y.avg!==x.avg)return y.avg-x.avg;}
-    if(y.total!==x.total)return y.total-x.total;if(y.wins!==x.wins)return y.wins-x.wins;if(y.diff!==x.diff)return y.diff-x.diff;
+    if(rankBy==='wins'){if(y.winsPlus!==x.winsPlus)return y.winsPlus-x.winsPlus;if(y.total!==x.total)return y.total-x.total;if(y.diff!==x.diff)return y.diff-x.diff;}
+    else if(rankBy==='diff'){if(y.diff!==x.diff)return y.diff-x.diff;if(y.wins!==x.wins)return y.wins-x.wins;if(y.total!==x.total)return y.total-x.total;}
+    else if(rankBy==='ratio'){if((y.played>0)!==(x.played>0))return (y.played>0)-(x.played>0);if(y.ratio!==x.ratio)return y.ratio-x.ratio;if(y.wins!==x.wins)return y.wins-x.wins;if(y.diff!==x.diff)return y.diff-x.diff;}
+    else if(rankBy==='avg'){if(y.avg!==x.avg)return y.avg-x.avg;if(y.wins!==x.wins)return y.wins-x.wins;if(y.diff!==x.diff)return y.diff-x.diff;}
+    else{if(y.total!==x.total)return y.total-x.total;if(y.wins!==x.wins)return y.wins-x.wins;if(y.diff!==x.diff)return y.diff-x.diff;}
     if(x.played!==y.played)return x.played-y.played;
     return x.name.localeCompare(y.name);
   });
@@ -658,9 +669,16 @@ function standings(c,uptoRound){
   return rows;
 }
 const fmt=n=>Number.isInteger(n)?String(n):n.toFixed(1);
-function rankNote(){const m=S.settings.scoring,avg=S.settings.byeComp==='average',byAvg=S.settings.rankBy==='avg';
-  if(m==='wins')return 'Ranked by wins'+(avg?' (a sit-out counts as half a win)':'')+(byAvg?', averaged per match played':'')+', then point difference';
-  return 'Ranked by '+(byAvg?'average per match':'total'+(m==='both'?' (score + win bonus)':''))+', then wins, then difference'+(avg?' · sit-outs receive the round average':'');}
+const RANK_SYSTEMS=[['total','Points','Points won (+ sit-out average), then wins'],['wins','Wins','Wins first, then points, then difference'],['diff','+/-','Points won minus points lost'],['ratio','Ratio','Share of points won, pf ÷ (pf + pa)'],['avg','Average','Points per match played']];
+function rankLabel(){return ({total:S.settings.scoring==='wins'?'Wins':'Total',wins:'Wins',diff:'+/-',ratio:'Ratio',avg:'Avg'})[S.settings.rankBy]||'Total';}
+function rankValue(r){const rb=S.settings.rankBy;if(rb==='wins')return fmt(r.winsPlus);if(rb==='diff')return (r.diff>0?'+':'')+fmt(r.diff);if(rb==='ratio')return r.played?(r.ratio*100).toFixed(0)+'%':'–';if(rb==='avg')return r.avg.toFixed(1);return fmt(r.total);}
+function rankNote(){const m=S.settings.scoring,avg=S.settings.byeComp==='average',rb=S.settings.rankBy;
+  if(rb==='wins')return 'Ranked by wins (draw = half), then points, then difference';
+  if(rb==='diff')return 'Ranked by point difference (won minus lost), then wins';
+  if(rb==='ratio')return 'Ranked by share of points won, then wins; sit-outs neither help nor hurt';
+  if(rb==='avg')return 'Ranked by points per match played, then wins';
+  if(m==='wins')return 'Ranked by wins'+(avg?' (a sit-out counts as half a win)':'')+', then point difference';
+  return 'Ranked by total points'+(m==='both'?' (score + win bonus)':'')+', then wins, then difference'+(avg?' · sit-outs receive the round average':'');}
 
 /* ---------------- timer ---------------- */
 let audioCtx=null,alarmDone={};
@@ -896,10 +914,11 @@ function renderStandings(c){
   return `<div class="stack">
     <div class="row between"><div><div class="eyebrow">${esc(c.name)} · after ${done} complete round${done===1?'':'s'}</div><h2 style="font-size:30px">Standings</h2></div>
       <div class="row"><button class="btn sm" data-act="copy">Copy</button><button class="btn sm" data-act="share">Share</button><button class="btn sm" data-act="print">Print</button></div></div>
-    ${done?`<div class="podium">${[1,0,2].map(i=>top[i]?`<div class="pod p${i+1}"><div class="place">${['1st','2nd','3rd'][i]}</div><div class="pname">${esc(top[i].name)}</div><div class="pts">${mode==='wins'?fmt(top[i].total)+'W':fmt(top[i].total)}</div></div>`:'').join('')}</div>`:''}
-    <div class="card tablewrap"><table class="stand"><thead><tr><th>#</th><th>Player</th><th>P</th><th>W</th>${mode==='wins'?'':'<th>For</th>'}<th>+/-</th><th>${mode==='wins'?'Wins':S.settings.rankBy==='avg'?'Avg':'Total'}</th></tr></thead><tbody>
+    <div class="row" style="gap:6px"><span class="eyebrow" style="margin-right:4px">Rank by</span>${RANK_SYSTEMS.map(([v,l,d])=>`<button class="chip rankchip ${S.settings.rankBy===v?'on':''}" data-act="rankby" data-v="${v}" title="${esc(d)}">${l}</button>`).join('')}</div>
+    ${done?`<div class="podium">${[1,0,2].map(i=>top[i]?`<div class="pod p${i+1}"><div class="place">${['1st','2nd','3rd'][i]}</div><div class="pname">${esc(top[i].name)}</div><div class="pts">${rankValue(top[i])}</div></div>`:'').join('')}</div>`:''}
+    <div class="card tablewrap"><table class="stand"><thead><tr><th>#</th><th>Player</th><th>P</th><th>W</th>${mode==='wins'?'':'<th>For</th>'}<th>+/-</th><th>${rankLabel()}</th></tr></thead><tbody>
     ${rows.map(r=>{const mv=prevRank[r.id]?prevRank[r.id]-r.rank:0;return `<tr class="${r.rank===1&&done?'top1':''} ${r.active?'':'off'}" data-act="open" data-id="${r.id}" style="cursor:pointer">
-      <td class="r">${r.rank}<span class="mv ${mv>0?'up':mv<0?'dn':''}">${mv>0?'▲':mv<0?'▼':''}</span></td><td class="n">${esc(r.name)}${r.active?'':' <span class="muted" style="font-size:12px">(out)</span>'}</td><td>${r.played}</td><td>${r.wins}${r.draws?`<span class="muted">+${r.draws}d</span>`:''}</td>${mode==='wins'?'':`<td>${fmt(r.pf)}${r.bonus?`<span class="muted" title="bye compensation">+${fmt(r.bonus)}</span>`:''}</td>`}<td>${r.diff>0?'+':''}${fmt(r.diff)}</td><td class="tot">${S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total)}</td></tr>
+      <td class="r">${r.rank}<span class="mv ${mv>0?'up':mv<0?'dn':''}">${mv>0?'▲':mv<0?'▼':''}</span></td><td class="n">${esc(r.name)}${r.active?'':' <span class="muted" style="font-size:12px">(out)</span>'}</td><td>${r.played}</td><td>${r.wins}${r.draws?`<span class="muted">+${r.draws}d</span>`:''}</td>${mode==='wins'?'':`<td>${fmt(r.pf)}${r.bonus?`<span class="muted" title="bye compensation">+${fmt(r.bonus)}</span>`:''}</td>`}<td>${r.diff>0?'+':''}${fmt(r.diff)}</td><td class="tot">${rankValue(r)}</td></tr>
       ${open===r.id?`<tr class="expand"><td colspan="7">${renderHistory(c,r.id)}</td></tr>`:''}`}).join('')}
     </tbody></table></div>
     <div class="muted" style="font-size:12px;text-align:center">${rankNote()}. Tap a player for their day.</div>
@@ -947,7 +966,7 @@ function renderScreen(){
           <div class="tm a ${w==='a'?'win':''}">${m.a.map(id=>esc(pname(c,id))).join('<br>')}</div>
           <div class="sc">${d?(mode==='wins'?(w==='a'?'W · L':'L · W'):`${m.sa}–${m.sb}`):'<span class="live">In play</span>'}</div>
           <div class="tm b ${w==='b'?'win':''}">${m.b.map(id=>esc(pname(c,id))).join('<br>')}</div></div>`}).join('')}</div>`:''}
-      <div class="stab ${rows.length>9?'two':''}">${(rows.length>9?[rows.slice(0,Math.ceil(rows.length/2)),rows.slice(Math.ceil(rows.length/2))]:[rows]).map(part=>`<table><tbody>${part.map(x=>`<tr class="${x.rank===1&&done?'top1':''}"><td class="r">${x.rank}</td><td class="n">${esc(x.name)}</td><td class="s">${x.played}p · ${x.wins}w</td><td class="v">${S.settings.rankBy==='avg'?x.avg.toFixed(1):fmt(x.total)}</td></tr>`).join('')}</tbody></table>`).join('')}</div>
+      <div class="stab ${rows.length>9?'two':''}">${(rows.length>9?[rows.slice(0,Math.ceil(rows.length/2)),rows.slice(Math.ceil(rows.length/2))]:[rows]).map(part=>`<table><tbody>${part.map(x=>`<tr class="${x.rank===1&&done?'top1':''}"><td class="r">${x.rank}</td><td class="n">${esc(x.name)}</td><td class="s">${x.played}p · ${x.wins}w</td><td class="v">${rankValue(x)}</td></tr>`).join('')}</tbody></table>`).join('')}</div>
     </section>`;
   }).join('');
   const timers=classes.map(c=>{const r=c.rounds[c.rounds.length-1];if(!r)return '';const running=r.startedAt&&r.pausedLeft==null;return `<span class="stimer ${timerLeft(r)<=0&&running?'over':''}" data-timer="${c.rounds.length-1}" data-cls="${c.id}">${esc(c.name)} <span class="tt">${timerStr(r)}</span></span>`}).filter(Boolean).join(' · ');
@@ -995,7 +1014,7 @@ function renderCeremony(){
   const step=Math.max(0,Math.min(4,st.step||0));
   const rows=standings(c).filter(r=>r.played>0);
   const mode=S.settings.scoring;
-  const val=r=>mode==='wins'?fmt(r.total)+' wins':S.settings.rankBy==='avg'?r.avg.toFixed(1)+' avg':fmt(r.total)+' pts';
+  const val=r=>rankValue(r)+' '+({total:mode==='wins'?'wins':'pts',wins:'wins',diff:'',ratio:'',avg:'avg'})[S.settings.rankBy];
   const top=[rows[0],rows[1],rows[2]];
   let inner='';
   if(step===0){
@@ -1028,7 +1047,7 @@ function openSettings(){
     <div><div class="eyebrow" style="margin-bottom:6px">What counts</div>${radio('scoring',s.scoring,[['points','Points / games','Enter the score, e.g. 6–3. Each player banks their pair’s score.'],['wins','Wins only','Tap the winning pair. One point per win.'],['both','Points + win bonus','Score plus a bonus for the win (set below).']])}</div>
     <div class="grid2"><label class="field">Win bonus<input class="input" type="number" name="winPts" value="${s.winPts}"></label><label class="field">Draw bonus<input class="input" type="number" name="drawPts" value="${s.drawPts}"></label></div>
     <div><div class="eyebrow" style="margin-bottom:6px">Players who sit out a round</div>${radio('byeComp',s.byeComp,[['average','Get the round average','Fair when numbers don’t divide by four.'],['none','Get nothing','Ranking is then best combined with “average per match”.']])}</div>
-    <div><div class="eyebrow" style="margin-bottom:6px">Rank by</div>${radio('rankBy',s.rankBy,[['total','Total','Most points (or wins) over the day.'],['avg','Average per match','Fairer if people arrive late or leave early.']])}</div>
+    <div><div class="eyebrow" style="margin-bottom:6px">Rank by</div>${radio('rankBy',s.rankBy,RANK_SYSTEMS.map(([v,l,d])=>[v,l,d]))}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Draw</div>${radio('drawMode',s.drawMode,[['americano','Americano · random','New partners every round, never the same partner twice when avoidable.'],['balanced','Random but even','Random fours, then paired so the two teams are as equal as possible on current standings. Round 1 is pure random.'],['mexicano','Mexicano · by standings','1st & 4th vs 2nd & 3rd, then the next four. Tighter matches late in the day.']])}</div>
     <div><div class="eyebrow" style="margin-bottom:6px">Appearance</div><select class="input" name="theme"><option value="light" ${(localStorage.getItem('courtside.theme')||'light')==='light'?'selected':''}>Light (limestone)</option><option value="dark" ${localStorage.getItem('courtside.theme')==='dark'?'selected':''}>Dark (courtside)</option><option value="auto" ${localStorage.getItem('courtside.theme')==='auto'?'selected':''}>Follow device</option></select></div>
     <div class="hr"></div>
@@ -1141,6 +1160,7 @@ document.addEventListener('click',e=>{
     case 'cerback':{const st=S.ui.cer||(S.ui.cer={step:0});if(st.step>0){st.step--;save();render();}break;}
     case 'cercls':{S.ui.cer={cls:el.dataset.id,step:0};save();render();break;}
     case 'print':printSheet();break;
+    case 'rankby':{S.settings.rankBy=el.dataset.v;S.settingsAt=Date.now();SYNC.settingsDirty=true;save();render();pushNow();toast('Ranking: '+el.textContent+'. Results unchanged.');break;}
     case 'takeover':takeOver(el.dataset.id);break;
     case 'takeback':{const k=S.conflicts&&S.conflicts[c.id];if(!k)return;snapshot();Object.assign(c,k.mine);c.owner=DEVICE;c.ownerLabel=S.sync.label||'';c.claimedAt=Date.now();c.updatedAt=Date.now();delete S.conflicts[c.id];SYNC.dirty.add(c.id);save();pushNow();render();toast(c.name+' is back on this iPad, publishing');break;}
     case 'dropmine':{if(S.conflicts)delete S.conflicts[c.id];save();render();toast('Kept the other iPad’s version');break;}
@@ -1175,11 +1195,11 @@ function printSheet(){
   let el=document.getElementById('print');if(!el){el=document.createElement('div');el.id='print';document.body.appendChild(el);}
   const classes=S.classes.filter(c=>c.rounds.length);
   if(!classes.length){toast('Nothing to print yet');return;}
-  const val=r=>S.settings.rankBy==='avg'?r.avg.toFixed(1):fmt(r.total);
+  const val=r=>rankValue(r);
   el.innerHTML=`<h1>${esc(S.meta.name)}</h1><div class="psub">${esc(S.meta.sub)}</div>`+classes.map(c=>{
     const rows=standings(c);const done=c.rounds.filter(roundComplete).length;
     return `<section class="pclass"><h2>${esc(c.name)} · final standings</h2>
-      <table><thead><tr><th class="r">#</th><th>Player</th><th class="r">Played</th><th class="r">Won</th>${mode==='wins'?'':'<th class="r">For</th><th class="r">+/-</th>'}<th class="r">${mode==='wins'?'Wins':S.settings.rankBy==='avg'?'Average':'Total'}</th></tr></thead><tbody>
+      <table><thead><tr><th class="r">#</th><th>Player</th><th class="r">Played</th><th class="r">Won</th>${mode==='wins'?'':'<th class="r">For</th><th class="r">+/-</th>'}<th class="r">${rankLabel()}</th></tr></thead><tbody>
       ${rows.map(r=>`<tr><td class="r">${r.rank}</td><td>${esc(r.name)}${r.active?'':' (out)'}</td><td class="r">${r.played}</td><td class="r">${r.wins}</td>${mode==='wins'?'':`<td class="r">${fmt(r.pf)}${r.bonus?' +'+fmt(r.bonus):''}</td><td class="r">${r.diff>0?'+':''}${fmt(r.diff)}</td>`}<td class="r"><b>${val(r)}</b></td></tr>`).join('')}
       </tbody></table>
       <div class="fine">${done} of ${c.rounds.length} rounds complete · ${rankNote()}</div>
@@ -1191,7 +1211,7 @@ function printSheet(){
 
 function standingsText(c){
   const rows=standings(c);const mode=S.settings.scoring;
-  return `${S.meta.name} · ${c.name}\n`+rows.map(r=>`${r.rank}. ${r.name} · ${mode==='wins'?fmt(r.total)+' wins':fmt(r.total)+' pts'} (${r.played} pl, ${r.wins} w)`).join('\n');
+  return `${S.meta.name} · ${c.name} · ${rankLabel()}\n`+rows.map(r=>`${r.rank}. ${r.name} · ${rankValue(r)} (${r.played} pl, ${r.wins} w, ${r.diff>0?'+':''}${fmt(r.diff)})`).join('\n');
 }
 
 applyTheme();
