@@ -757,7 +757,9 @@ function renderHistory(c,id){
 }
 
 function renderScreen(){
-  const classes=S.classes.filter(c=>c.rounds.length||c.players.length);
+  // one iPad per class: show only classes that have been drawn, so the other class never sits there as "waiting"
+  const drawn=S.classes.filter(c=>c.rounds.length);
+  const classes=drawn.length?drawn:S.classes.filter(c=>c.players.length);
   const cols=Math.max(1,Math.min(3,classes.length));
   const mode=S.settings.scoring;
   const body=classes.map(c=>{
